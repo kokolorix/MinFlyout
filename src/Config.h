@@ -63,6 +63,7 @@ struct Config {
     bool showBuiltinItems = true;        ///< Show the built-in text items below the layouts.
     bool useWorkArea = true;             ///< Base percentages on the work area (instead of the full monitor).
     bool logToFile = false;              ///< Also write the debug log to \c %APPDATA%\\MinFlyout\\minflyout.log.
+    bool watchConfig = true;             ///< Reload automatically as soon as the file is saved.
     bool showAllMonitors = true;         ///< Offer every monitor, not just the one the window is on.
     std::vector<Layout> layouts;         ///< Configured layouts.
 

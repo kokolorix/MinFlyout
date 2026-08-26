@@ -26,8 +26,8 @@ constexpr const char* kTemplate =
     "// MinFlyout - configuration\n"
     "//\n"
     "// This file is JSONC: comments (// and /* */) and trailing commas are\n"
-    "// allowed. Changes are applied through the tray menu command\n"
-    "// \"Reload configuration\".\n"
+    "// allowed. Saving the file applies the changes right away; the tray menu\n"
+    "// command \"Reload configuration\" does the same by hand.\n"
     "{\n"
     "  // How long the pointer must rest on the minimize button before the flyout opens.\n"
     "  \"hoverDelayMs\": 350,\n"
@@ -61,6 +61,10 @@ constexpr const char* kTemplate =
     "  // goes to the debugger output; this adds the file (rotated at 1 MB).\n"
     "  // Only has an effect in builds with logging compiled in.\n"
     "  \"logToFile\": false,\n"
+    "\n"
+    "  // Watch this file and reload it as soon as it is saved. Turn it off if\n"
+    "  // %APPDATA% lives on a network share that reports no changes.\n"
+    "  \"watchConfig\": true,\n"
     "\n"
     "  // Layouts. Each layout is drawn as a miniature of the monitor, each of its\n"
     "  // zones as a tile inside it. Clicking a tile moves the window to that zone\n"
@@ -349,6 +353,7 @@ bool ConfigStore::ParseInto(const std::wstring& text, Config& out) {
     out.showBuiltinItems = root.boolean(L"showBuiltinItems", true);
     out.useWorkArea = root.boolean(L"useWorkArea", true);
     out.logToFile = root.boolean(L"logToFile", false);
+    out.watchConfig = root.boolean(L"watchConfig", true);
     out.traceDetection = root.boolean(L"traceDetection", false);
 
     out.showAllMonitors = root.boolean(L"showAllMonitors", true);

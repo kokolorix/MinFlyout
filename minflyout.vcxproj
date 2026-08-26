@@ -59,6 +59,7 @@
     <ClCompile Include="src\CaptionProbe.cpp" />
     <ClCompile Include="src\Common.cpp" />
     <ClCompile Include="src\Config.cpp" />
+    <ClCompile Include="src\ConfigWatcher.cpp" />
     <ClCompile Include="src\Diagnostics.cpp" />
     <ClCompile Include="src\FlyoutWindow.cpp" />
     <ClCompile Include="src\HookThread.cpp" />
@@ -76,6 +77,7 @@
     <ClInclude Include="src\CaptionProbe.h" />
     <ClInclude Include="src\Common.h" />
     <ClInclude Include="src\Config.h" />
+    <ClInclude Include="src\ConfigWatcher.h" />
     <ClInclude Include="src\Diagnostics.h" />
     <ClInclude Include="src\FlyoutWindow.h" />
     <ClInclude Include="src\HookThread.h" />

@@ -42,6 +42,7 @@ enum : UINT {
     WM_MFLY_CLOSED    = WM_APP + 5,  ///< Flyout asks to be closed (e.g. theme change).
     WM_MFLY_TRAY      = WM_APP + 6,  ///< Notification from a tray icon.
     WM_MFLY_ZONE      = WM_APP + 7,  ///< Flyout reports the chosen zone (\c wParam = hotspot index).
+    WM_MFLY_CONFIG    = WM_APP + 8,  ///< Configuration file was saved (posted by the ConfigWatcher).
 };
 
 /** \name Default values for timings (milliseconds)

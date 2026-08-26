@@ -485,14 +485,15 @@ void FlyoutWindow::PaintMonitorRow(HDC dc, size_t rowIndex) {
         // The hotspots of this miniature follow its zones one by one, so the
         // hovered tile is known by index instead of by comparing geometry.
         size_t spot = zoneFirst_[miniIndex];
-        for (const Zone& zone : layout.zones) {
-            const RECT tile = ZoneRect(mini, zone, Scale(kZoneGap, dpi_));
-            const bool hot = static_cast<int>(spot) == hotZone_;
-            if(hot)
-            {
-					FillRounded(dc, tile, pal.accent, Scale(2, dpi_));
-            }
-            ++spot;
+		  for (const Zone& zone : layout.zones) {
+			  const RECT tile = ZoneRect(mini, zone, Scale(kZoneGap, dpi_));
+			  const bool hot = static_cast<int>(spot) == hotZone_;
+			  if (hot)
+			  {
+				  FillRounded(dc, tile, pal.accent, Scale(2, dpi_));
+				  FrameRounded(dc, tile, pal.border, Scale(2, dpi_));
+			  }
+			  ++spot;
         }
     }
 }

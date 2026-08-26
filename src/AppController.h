@@ -10,6 +10,7 @@
 
 #include "CaptionProbe.h"
 #include "Common.h"
+#include "ConfigWatcher.h"
 #include "FlyoutWindow.h"
 #include "HookThread.h"
 
@@ -192,12 +193,21 @@ private:
     /**
      * \brief Re-reads the configuration file and reports the result.
      *
-     * Reachable through the tray menu and through a double click on the tray
-     * icon, which is the default action of that icon. The providers read the
+     * Reachable through the tray menu, and through \ref WM_MFLY_CONFIG whenever
+     * \ref mfly::ConfigWatcher has seen a save. The providers read the
      * configuration afresh on every open, so re-registering them is not
      * necessary.
      */
     void ReloadConfig();
+
+    /**
+     * \brief Brings \ref watcher_ in line with Config::watchConfig.
+     *
+     * Called after every load, so the switch takes effect within the reload it
+     * appears in. Starting it twice is a no-op, so the common case - the
+     * setting did not change - costs nothing.
+     */
+    void ApplyWatchSetting();
 
     /**
      * \brief Shows a balloon tip on the application tray icon.
@@ -224,8 +234,9 @@ private:
     HICON     appIcon_ = nullptr;   ///< Program icon in window size (Alt-Tab, taskbar).
     HICON     trayIcon_ = nullptr;  ///< Program icon in notification area size.
 
-    HookThread   hooks_;   ///< Low-level hooks on their own thread.
-    FlyoutWindow flyout_;  ///< The popup.
+    HookThread    hooks_;   ///< Low-level hooks on their own thread.
+    FlyoutWindow  flyout_;  ///< The popup.
+    ConfigWatcher watcher_; ///< Watches the configuration file, if enabled.
 
     State state_ = State::Idle;       ///< Current state.
     bool  paused_ = false;            ///< Detection paused.

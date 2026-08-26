@@ -70,6 +70,11 @@
       "default": false,
       "description": "Also write the debug log to minflyout.log next to this file. Only has an effect in builds with logging compiled in."
     },
+    "watchConfig": {
+      "type": "boolean",
+      "default": true,
+      "description": "Watch this file and reload it as soon as it is saved. Turn it off if %APPDATA% lives on a network share that reports no changes; the tray menu command \"Reload configuration\" keeps working either way."
+    },
     "layouts": {
       "type": "array",
       "description": "Layouts offered in the flyout. Each one is drawn as a miniature of the monitor. An empty array hides the miniature area; a missing property falls back to the built-in layouts.",

@@ -54,6 +54,9 @@
     <ClCompile Include="src\Config.cpp">
       <Filter>Configuration</Filter>
     </ClCompile>
+    <ClCompile Include="src\ConfigWatcher.cpp">
+      <Filter>Configuration</Filter>
+    </ClCompile>
     <ClCompile Include="src\Json.cpp">
       <Filter>Configuration</Filter>
     </ClCompile>
@@ -99,6 +102,9 @@
       <Filter>Configuration</Filter>
     </ClInclude>
     <ClInclude Include="src\Config.h">
+      <Filter>Configuration</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ConfigWatcher.h">
       <Filter>Configuration</Filter>
     </ClInclude>
     <ClInclude Include="src\Json.h">

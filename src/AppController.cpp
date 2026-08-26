@@ -89,6 +89,7 @@ bool AppController::Init(HINSTANCE instance) {
     log::SetFileLogging(config.logToFile);
     ParseProbeMode(config.buttonDetection, probeMode_);
     traceDetection_ = config.traceDetection;
+    ApplyWatchSetting();
     if (config.hasError()) {
         WRITE_WARNING_LOG(L"Configuration not usable, running on defaults", config.error);
     } else {
@@ -129,6 +130,7 @@ void AppController::Shutdown() {
     }
     CloseFlyout(false);
     hooks_.Stop();
+    watcher_.Stop();
 
     // Hidden foreign windows MUST come back.
     TrayStash::Instance().RestoreAll();
@@ -551,6 +553,7 @@ void AppController::ReloadConfig() {
     probeMode_ = ProbeMode::Auto;
     ParseProbeMode(config.buttonDetection, probeMode_);
     traceDetection_ = config.traceDetection;
+    ApplyWatchSetting();
 
     if (ok) {
         wchar_t text[128] = {};
@@ -562,6 +565,23 @@ void AppController::ReloadConfig() {
     } else {
         ShowTrayBalloon(L"Configuration error", config.error, true);
         WRITE_WARNING_LOG(L"Configuration reload failed", config.error);
+    }
+}
+
+void AppController::ApplyWatchSetting() {
+    const Config& config = ConfigStore::Instance().current();
+
+    if (!config.watchConfig) {
+        watcher_.Stop();
+        return;
+    }
+    if (watcher_.watching()) return;
+
+    // config.path is empty only when %APPDATA% could not be resolved - then
+    // there is nothing to watch and the error is already in Config::error.
+    if (!config.path.empty() && !watcher_.Start(hwnd_, config.path)) {
+        WRITE_WARNING_LOG(L"Configuration file is not being watched, "
+                          L"use the tray menu to reload", config.path);
     }
 }
 
@@ -643,6 +663,12 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_MFLY_CLOSED:
         CloseFlyout(false);
+        return 0;
+
+    case WM_MFLY_CONFIG:
+        // The watcher has debounced the save already; this is one message per
+        // save, not one per write.
+        ReloadConfig();
         return 0;
 
     case WM_MFLY_TRAY:

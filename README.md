@@ -237,7 +237,18 @@ switch is `"json.validate.enable": false`, which would also disable the schema a
 
 If the file is malformed, the application keeps running with the default values and reports
 line and column – in the flyout as a clickable item, on reload as a balloon on the tray icon.
-Changes are picked up by *Reload configuration* in the tray menu without a restart.
+
+### Saving is enough
+
+The file is watched, so **saving it applies the changes** — no restart, no menu command. A
+balloon on the tray icon confirms the reload, or names line and column if the file does not
+parse. *Reload configuration* in the tray menu still does the same by hand.
+
+The watch sits on the folder rather than on the file: editors that save by writing a
+temporary file and renaming it over the original would otherwise slip through. Entries are
+filtered by name (`minflyout.log` lives in the same folder), and 300 ms of silence must pass
+before the reload runs, so one save is one reload and not three. `"watchConfig": false` turns
+it off — worth knowing if `%APPDATA%` is redirected to a share that reports no changes.
 
 ## Structure
 
@@ -252,6 +263,7 @@ Changes are picked up by *Reload configuration* in the tray menu without a resta
 | `src/ItemRegistry.*` | provider registry, merging of the items |
 | `src/BuiltinProviders.cpp` | the two providers: core actions and window groups |
 | `src/Config.*` | loading/creating `config.jsonc`, schema, default values |
+| `src/ConfigWatcher.*` | watches the folder, debounces, posts one message per save |
 | `src/Json.*` | JSONC parser (comments, trailing commas), no third-party library |
 | `src/Log.*` | `WRITE_*_LOG` macros, debugger output and optional log file |
 | `src/Monitors.*` | enumerates the monitors shown in the flyout |
