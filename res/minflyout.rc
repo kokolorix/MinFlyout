@@ -1,0 +1,49 @@
+// ---------------------------------------------------------------------------
+// MinFlyout - resources
+// Deliberately ASCII only, so that MSVC (rc.exe) and MinGW (windres) both
+// process the file without a codepage specification.
+// ---------------------------------------------------------------------------
+#include <windows.h>
+#include "resource.h"
+
+// Explorer uses the numerically lowest icon resource as the file icon -
+// that is why the application icon stands alone and comes first.
+IDI_APPICON ICON "minflyout.ico"
+
+// Visual Studio binds the manifest in via the manifest tool (see
+// minflyout.vcxproj). MinGW has no such tool - there it is embedded here;
+// CMake defines MFLY_EMBED_MANIFEST accordingly.
+#ifdef MFLY_EMBED_MANIFEST
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "minflyout.manifest"
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS      VS_FF_DEBUG
+#else
+ FILEFLAGS      0x0L
+#endif
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"          // US English, Unicode
+        BEGIN
+            VALUE "FileDescription", "MinFlyout - flyout above the minimize button"
+            VALUE "FileVersion",     "1.0.0.0"
+            VALUE "InternalName",    "minflyout"
+            VALUE "OriginalFilename","minflyout.exe"
+            VALUE "ProductName",     "MinFlyout"
+            VALUE "ProductVersion",  "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

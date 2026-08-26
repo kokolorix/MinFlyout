@@ -1,0 +1,323 @@
+/**
+ * \mainpage MinFlyout
+ *
+ * A system-wide flyout above the **minimize** button - the counterpart to the
+ * Snap Layouts that Windows shows above the maximize button. Pure Win32/C++20,
+ * GDI rendering, no runtime dependencies and no third-party libraries. The
+ * flyout previews the monitors with their configured zones; the layouts live
+ * in a JSONC file in the user profile and can be tied to particular screens.
+ *
+ * \section main_flow Flow
+ *
+ * ```
+ * [hook thread]                 [controller UI thread]
+ * WH_MOUSE_LL ──PostMessage──▶  HandleMouseMove()
+ * (does NOTHING but post)        ├─ WindowFromPoint + GetAncestor(GA_ROOT)
+ *                                ├─ ask:     WM_NCHITTEST == HTMINBUTTON
+ *                                │           then edge search => button rect
+ *                                │           (gated by nothing of ours)
+ *                                ├─ else, and only inside the caption button
+ *                                │  region: compute from the DWM block, the
+ *                                │  title bar strip or the frame
+ *                                ├─ hover delay  ──▶  monitors + layouts + items
+ *                                └─ FlyoutWindow::Show(content, buttonRect, dpi)
+ * ```
+ *
+ * \section main_design Design decisions
+ *
+ * - **No DLL injection, no CBT hooks.** Nothing is loaded into a foreign
+ *   process. Detection asks through \c WM_NCHITTEST via
+ *   \c SendMessageTimeout (\c SMTO_ABORTIFHUNG), the documented interface
+ *   Windows itself uses to evaluate the caption buttons, and otherwise reads
+ *   public window data. See \ref mfly::ProbeMinimizeButton.
+ * - **The button rect is measured, not guessed.** Starting from the cursor, all
+ *   four directions are searched for how far \c HTMINBUTTON still applies -
+ *   first coarsely in 4-pixel steps, then refined by binary search. This makes
+ *   detection independent of theme, DPI and border width.
+ * - **And where nobody answers, it is computed.** An app with its own title bar
+ *   may report its button area as plain client space; then the position is
+ *   derived instead, from the caption button block DWM reports, from the title
+ *   bar strip, or in the end from the visible frame and the caption height. The
+ *   arithmetic is in CaptionGeometry.h, the ladder in \ref mfly::ProbeSource.
+ * - **Hooks in a dedicated thread.** Low-level hooks are processed
+ *   synchronously in the input path; if the same thread queried a hung window,
+ *   the mouse would stutter system-wide. See \ref mfly::HookThread.
+ * - **The flyout never activates itself** (\c WS_EX_NOACTIVATE and
+ *   \c MA_NOACTIVATE), the target window keeps the focus.
+ * - **Flush edges.** When the size is applied, the invisible shadow border from
+ *   \c DWMWA_EXTENDED_FRAME_BOUNDS is subtracted, otherwise a gap opens up
+ *   between two windows placed side by side
+ *   (\ref mfly::ApplyZone).
+ *
+ * \section main_modules Modules
+ *
+ * | Module | Content |
+ * |---|---|
+ * | \ref app    | \ref mfly::AppController, state machine, entry point |
+ * | \ref detect | \ref mfly::HookThread, \ref mfly::ProbeMinimizeButton, \ref mfly::CaptionButtonRect |
+ * | \ref ui     | \ref mfly::FlyoutWindow, \ref mfly::EnumerateMonitors, \ref mfly::TrayStash |
+ * | \ref config | \ref mfly::ConfigStore, \ref mfly::SelectorMatches, \ref mfly::Registry, \ref mfly::ApplyZone |
+ *
+ * \section main_config Configuration file
+ *
+ * On first start \c \%APPDATA%\\MinFlyout\\config.jsonc is created with a
+ * commented template. The format is JSONC - comments and trailing commas are
+ * allowed:
+ *
+ * \code{.js}
+ * {
+ *   "hoverDelayMs": 350,       // hover delay before opening
+ *   "closeGraceMs": 260,       // grace period before closing
+ *   "showBuiltinItems": true,  // show the text items below the layouts
+ *   "useWorkArea": true,       // compute percentages without the taskbar
+ *   "showAllMonitors": true,   // offer every screen, not just the current one
+ *   "buttonDetection": "auto", // ask the window, compute when it stays silent
+ *
+ *   "layouts": [
+ *     {
+ *       "name": "Halves",
+ *       "zones": [
+ *         { "left":  0, "top": 0, "width": 50, "height": 100 },
+ *         { "left": 50, "top": 0, "width": 50, "height": 100 },
+ *       ],
+ *     },
+ *     {
+ *       "name": "Thirds",
+ *       "monitors": [ "3840x2160" ],   // only on the wide screen
+ *       "zones": [ ... ],              // as above
+ *     },
+ *   ],
+ * }
+ * \endcode
+ *
+ * A \ref mfly::Layout is drawn as a miniature of the monitor, each of its
+ * \ref mfly::Zone entries as a tile inside it. All four zone values are
+ * percentages of the monitor the miniature stands for.
+ *
+ * Zones are meant to tile the screen without overlapping, the way the Windows
+ * snap layouts do - but nothing enforces it. Where zones do overlap, the
+ * smallest one under the cursor wins, so a small tile drawn on top of a large
+ * one stays reachable.
+ *
+ * A missing \c layouts section falls back to \ref mfly::DefaultLayouts; an
+ * explicitly empty list hides the miniature area and leaves the text items.
+ *
+ * \subsection main_monitor_layouts Layouts for one screen
+ *
+ * Thirds are useful on an ultrawide panel and cramped on a laptop screen, so a
+ * layout can name the monitors it belongs on. Layout::monitors takes one
+ * selector or a list of them; without the key the layout shows up everywhere.
+ * \ref mfly::SelectorMatches accepts:
+ *
+ * | Selector | Matches |
+ * |---|---|
+ * | \c 1, \c 2, ...  | the monitor number the flyout caption shows |
+ * | \c "primary"     | the primary screen |
+ * | \c "secondary"   | every screen that is not the primary one |
+ * | \c "DISPLAY2"    | the device name; in full it needs JSON escaping: <code>"\\\\.\\DISPLAY2"</code> |
+ * | \c "3840x2160"   | every screen with that resolution |
+ * | \c "*"           | every screen - the default |
+ *
+ * Comparison ignores case and surrounding blanks, and the resolution accepts
+ * \c x, \c X and the multiplication sign, so a caption can be pasted straight
+ * out of the flyout. A screen that no layout applies to is left out of the
+ * flyout entirely - which is also how a single screen can be excluded: give
+ * every layout an explicit list that omits it.
+ *
+ * The rules live in MonitorSelector.h, free of Windows dependencies, and are
+ * covered by \c tests/SelectorTest.cpp.
+ *
+ * \subsection main_detection How the button is located
+ *
+ * \c "buttonDetection" chooses between the two ways of finding the minimize
+ * button, and \c "auto" walks them in order:
+ *
+ * | Value | Meaning |
+ * |---|---|
+ * | \c "auto"     | ask the window; compute the position when it stays silent |
+ * | \c "hittest"  | only ask - a window with its own title bar is not detected |
+ * | \c "computed" | never ask, always compute |
+ *
+ * Asking means \c WM_NCHITTEST and, on \c HTMINBUTTON, the edge search: exact,
+ * because the window itself draws the answer. It runs first and unconditionally
+ * - no assumption of ours stands in front of it, because an assumption that is
+ * wrong would hide a window that answers perfectly well. Computing needs
+ * nobody's cooperation and walks three sources, from precise to approximate
+ * (\ref mfly::ProbeSource):
+ *
+ * -# \c DWMWA_CAPTION_BUTTON_BOUNDS - DWM reports the whole button block; it is
+ *    divided into as many equal slots as the window styles call for.
+ * -# \c GetTitleBarInfo - an API, not a message, so it also answers for a
+ *    foreign process. It yields the exact title bar strip; only the button width
+ *    is then derived from its height.
+ * -# The visible frame plus the system caption height - the last resort.
+ *
+ * Which windows qualify is decided by the styles alone: \c WS_SYSMENU and
+ * \c WS_MINIMIZEBOX on a non-child window. \c WS_CAPTION is deliberately not
+ * required - an app that draws its own title bar usually drops it, and those
+ * are exactly the windows this path exists for
+ * (\ref mfly::CaptionLayoutOf).
+ *
+ * Which source produced a rectangle is written to the log on every detection.
+ * If none of them does, the log notes the window class and the \c HT code the
+ * window returned, so "it does not work with this app" becomes a line that says
+ * why (\ref mfly::AppController::LogDetectionMiss).
+ *
+ * The sibling message \c WM_GETTITLEBARINFOEX would deliver the individual
+ * button rectangles in one go, but it carries a pointer into the receiving
+ * window's address space and Windows is not documented to marshal it between
+ * processes. It is therefore deliberately not used.
+ *
+ * \subsection main_diagnosis When a window stays undetected
+ *
+ * Point at the button that does not react and press **Ctrl+Alt+F12**:
+ * \ref mfly::DiagnoseWindow walks the whole chain for the window under the
+ * cursor - ignore list, styles, frame, region, hit-test answer,
+ * \c GetTitleBarInfo, the DWM block, the computed rectangle - and ends with a
+ * verdict naming the step that failed. The report goes to the clipboard and to
+ * \c minflyout-diagnosis.txt next to the configuration.
+ *
+ * It deliberately avoids the \c WRITE_*_LOG macros: those are compiled out of a
+ * plain release build, and a diagnosis that only works in a debug build is no
+ * use when the problem appears in the release one. The report says on its
+ * second line which of the two builds is running, and carries
+ * \ref mfly::BuildStamp so a stale EXE gives itself away.
+ *
+ * \c "traceDetection": \c true adds one line per gate of the detection, so a
+ * movement that never reaches the probe can be followed to the gate it died at.
+ *
+ * Two things silence the detection with no error at all: Windows removes a
+ * low-level hook whose owner did not answer within \c LowLevelHooksTimeout -
+ * which happens to any process sitting at a debugger breakpoint - and the
+ * one-message-at-a-time throttle would stay armed forever if its message were
+ * lost. \ref mfly::AppController::CheckHookAlive watches for both and calls
+ * \ref mfly::HookThread::Revive.
+ *
+ * Watching the raw message traffic of a foreign window needs a hook inside that
+ * process - that is what Spy++ does and what MinFlyout deliberately does not.
+ * Note that \c spyxx.exe only sees 32-bit processes; on an all-64-bit system it
+ * shows nothing at all and \c spyxx_amd64.exe is the one to use.
+ *
+ * If the file is malformed, the application keeps working with the default
+ * values and reports line and column of the error - in the flyout as an item
+ * and on reload as a balloon on the tray icon.
+ *
+ * \section main_flyout What the flyout shows
+ *
+ * The upper part draws one row per monitor: a miniature for each layout that
+ * applies to that screen, in its aspect ratio, with the zones as tiles inside.
+ * Clicking a tile means "put the window on this monitor, into this zone" -
+ * screen and position in a single click, because the hotspot carries its
+ * \c HMONITOR along (\ref mfly::ApplyZone). Below the miniatures, separated by
+ * a line, come the text items from the providers.
+ *
+ * With more than one row each carries a caption - number, device name,
+ * resolution and, on the screen the window is on, \e (current). Those are
+ * exactly the selectors \ref mfly::SelectorMatches understands, so the
+ * configuration can be written from what the flyout shows.
+ *
+ * A window without a sizing border cannot be tiled; for those the miniature
+ * area is omitted and only the text items appear. The same happens to a screen
+ * that no layout applies to - it gets no row at all.
+ *
+ * \section main_build Building
+ *
+ * - **Visual Studio 2022:** open \c MinFlyout.sln, pick a configuration, F7.
+ *   Projects: \c minflyout (EXE), \c json_tests (the unit tests for the JSONC
+ *   parser and the monitor selectors, run immediately after building) and \c docs (generates this documentation; not built
+ *   automatically). Shared settings live in \c MinFlyout.props - in particular
+ *   \c /utf-8, without which the UTF-8 literals are misinterpreted.
+ * - **CMake:** \c "cmake -S . -B build" and \c "cmake --build build";
+ *   \c "ctest --test-dir build" runs the unit tests,
+ *   \c "cmake --build build --target docs" generates the documentation.
+ *
+ * \section main_logging Logging
+ *
+ * \code{.cpp}
+ * WRITE_INFO_LOG(L"Flyout opened");                          // message only
+ * WRITE_DEBUG_LOG(L"Button probed", probeTime.ElapsedMs());  // + duration
+ * WRITE_WARNING_LOG(L"Config rejected", config.error);       // + detail
+ * \endcode
+ *
+ * The macros in \ref Log.h expand to \ref mfly::log::Writer, which carries
+ * level, \c __FUNCTION__, \c __FILE__ and \c __LINE__. They are compiled in
+ * when \c _DEBUG or \c _RELEASE_WITH_DEBUG_LOG is defined; otherwise the
+ * arguments are discarded without being evaluated.
+ *
+ * Output goes to \c OutputDebugStringW, and with \c "logToFile": \c true also
+ * to \c \%APPDATA%\\MinFlyout\\minflyout.log. Every line is tab separated, has
+ * exactly eight columns and never leaves one empty - \c "-" stands in:
+ *
+ * ```
+ * time  thread  level  duration  message  function  file(line)  detail
+ * ```
+ *
+ * Nothing is logged from the hook callbacks or from the cheap pre-test that
+ * runs on every throttled mouse move.
+ *
+ * \subsection main_logviewplus Reading the log in LogViewPlus
+ *
+ * Parser \c DsvParser, file name pattern \c minflyout.log, \e "Is RegEx" off,
+ * and these parser arguments - the separators are real tab characters:
+ *
+ * ```
+ * %d{yyyy-MM-dd HH:mm:ss.fff}	%t	%p	%s{Duration}	%m	%c	%s{Source}	%S{Detail}
+ * ```
+ *
+ * LogViewPlus derives the delimiter from the pattern itself: the first
+ * non-space character that is not part of a specifier, here the tab. The eight
+ * columns map as follows.
+ *
+ * | # | Content | Specifier | Why |
+ * |---|---|---|---|
+ * | 1 | `2026-08-19 22:14:07.913` | <code>\%d{yyyy-MM-dd HH:mm:ss.fff}</code> | \c fff matches exactly three digits |
+ * | 2 | thread id | <code>\%t</code> | tells the UI thread and the hook thread apart |
+ * | 3 | `DEBUG` `INFO` `WARN` `ERROR` | <code>\%p</code> | the level names LogViewPlus knows |
+ * | 4 | duration in ms, or `-` | <code>\%s{Duration}</code> | own column, sortable |
+ * | 5 | message | <code>\%m</code> | may contain spaces |
+ * | 6 | function | <code>\%c</code> | mapped to the logger column, so filtering by origin works |
+ * | 7 | `AppController.cpp(193)` | <code>\%s{Source}</code> | no spaces, own column |
+ * | 8 | detail, or `-` | <code>\%S{Detail}</code> | window titles contain spaces |
+ *
+ * \c tools/minflyout-sample.log holds ten representative lines - one per level
+ * and one per overload - for the \e Testing tab, so the parser can be checked
+ * without running the program.
+ *
+ * \section main_icon Application icon
+ *
+ * Motif: the minimize stroke, with the unfolding flyout below it. The file
+ * \c res/minflyout.ico contains nine sizes from 16 to 256 px; the small ones are
+ * not downscaled but drawn separately (two instead of three menu rows, snapped
+ * to whole pixels). It is generated by \c tools/build_icon.py; \c res/icon.svg
+ * is the editable template of the large size. Everything is bound in via
+ * \c res/minflyout.rc, which also carries the version info.
+ *
+ * \section main_usage Usage
+ *
+ * Hold the mouse over the minimize button - the flyout unfolds below it.
+ * Leaving it, clicking elsewhere or ESC closes it again; a click on the button
+ * itself minimizes as usual.
+ *
+ * A double click on the tray icon reloads the configuration - that is the
+ * default action of the icon, and the menu marks the same command in bold. A
+ * right click opens the menu: *Paused*, *Restore all stashed windows*,
+ * *Open configuration*, *Reload configuration* and *Exit*.
+ *
+ * \section main_limits Limits
+ *
+ * - **UIPI:** windows of processes with a higher integrity level do not answer
+ *   \c WM_NCHITTEST. For elevated windows MinFlyout itself has to run
+ *   elevated.
+ * - **Custom title bars:** a window that answers \c WM_NCHITTEST with
+ *   \c HTMINBUTTON is measured exactly; for one that does not, the position is
+ *   computed. The computation assumes the system layout - one block of equally
+ *   wide buttons flush in the upper right corner - so an app that puts its
+ *   buttons somewhere else stays out of reach. \c "buttonDetection" selects
+ *   which of the two ways is used, and a failed detection is written to the log
+ *   with the class name and the \c HT code the window returned.
+ * - **Non-resizable windows** (without \c WS_THICKFRAME) show the size items
+ *   greyed out.
+ * - **Stashed windows:** \ref mfly::TrayStash restores them on exit and on
+ *   \c WM_QUERYENDSESSION; a crash of the host would leave them behind
+ *   invisible.
+ */

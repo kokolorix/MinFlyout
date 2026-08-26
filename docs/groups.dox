@@ -1,0 +1,33 @@
+/**
+ * \defgroup app Application
+ * \brief Entry point, state machine and shared foundations.
+ *
+ * This is where everything comes together: \ref mfly::AppController owns the
+ * invisible control window, receives all events as posted messages and decides
+ * when a flyout opens and closes again.
+ */
+
+/**
+ * \defgroup detect Detection
+ * \brief Determining whether the mouse pointer is over a minimize button.
+ *
+ * Consists of two parts: \ref mfly::HookThread delivers the mouse events
+ * without holding up the system input path, and \ref CaptionProbe.h answers via
+ * \c WM_NCHITTEST the question of what lies under the pointer.
+ */
+
+/**
+ * \defgroup ui User interface
+ * \brief The flyout itself and stashing into the notification area.
+ */
+
+/**
+ * \defgroup config Configuration and items
+ * \brief Providers, configuration file and applying the window sizes.
+ *
+ * The text items of the flyout come without exception from providers
+ * (\ref mfly::Registry). The layouts drawn above them come from
+ * \c %APPDATA%\\MinFlyout\\config.jsonc: \ref mfly::ConfigStore reads the file
+ * with the built-in JSONC parser (\ref Json.h), \ref mfly::ApplyZone converts
+ * a zone plus its monitor into screen coordinates.
+ */

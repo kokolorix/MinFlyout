@@ -1,0 +1,10 @@
+﻿2026-08-19 22:14:03.117	9284	INFO	-	Hook thread running	mfly::HookThread::Run	HookThread.cpp(121)	thread 9284
+2026-08-19 22:14:03.121	6120	INFO	-	Configuration loaded, 6 sizes	mfly::AppController::Init	AppController.cpp(83)	C:\Users\simon\AppData\Roaming\MinFlyout\config.jsonc
+2026-08-19 22:14:03.124	6120	INFO	-	MinFlyout started	mfly::AppController::Init	AppController.cpp(97)	pid 5312
+2026-08-19 22:14:07.913	6120	DEBUG	3	Minimize button detected 46x32	mfly::AppController::HandleMouseMove	AppController.cpp(193)	'Untitled - Notepad' [Notepad] pid 7744
+2026-08-19 22:14:08.271	6120	INFO	1	Flyout opened, 10 items, 144 dpi	mfly::AppController::OpenFlyout	AppController.cpp(243)	'Untitled - Notepad' [Notepad] pid 7744
+2026-08-19 22:14:09.884	6120	DEBUG	-	Applied 'Left half': 0,0 964x1032 (border 7,0,7,7)	mfly::ApplySizePreset	WindowSizer.cpp(152)	'Untitled - Notepad' [Notepad] pid 7744
+2026-08-19 22:14:09.886	6120	INFO	2	Item invoked: Left half	mfly::AppController::InvokeItem	AppController.cpp(276)	'Untitled - Notepad' [Notepad] pid 7744
+2026-08-19 22:14:15.002	6120	WARN	-	Configuration not usable, running on defaults	mfly::AppController::Init	AppController.cpp(81)	Line 12, column 3: Expected ',' or '}'
+2026-08-19 22:14:31.550	6120	ERROR	-	SetWindowPos failed, error 5	mfly::ApplySizePreset	WindowSizer.cpp(157)	'Administrator: cmd' [ConsoleWindowClass] pid 9012
+2026-08-19 22:14:44.208	6120	INFO	-	Shutting down	mfly::AppController::Shutdown	AppController.cpp(102)	-

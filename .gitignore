@@ -1,0 +1,21 @@
+# Build-Ausgaben
+build/
+build-*/
+out/
+__pycache__/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.aps
+*.VC.db
+*.VC.VC.opendb
+ipch/
+*.pdb
+*.idb
+*.ilk
+*.obj
+*.exp
+*.lib
+*.tlog

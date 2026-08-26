@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://minflyout.local/config.schema.json",
+  "title": "MinFlyout configuration",
+  "description": "Contents of %APPDATA%\\MinFlyout\\config.jsonc. The file is JSONC: comments and trailing commas are allowed.",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "monitorSelector": {
+      "description": "One screen: the monitor number from the flyout caption (1, 2, ...), \"primary\", \"secondary\", a device name such as \"DISPLAY2\", or a resolution such as \"3840x2160\".",
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
+    }
+  },
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL of this schema; ignored by MinFlyout."
+    },
+    "hoverDelayMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000,
+      "default": 350,
+      "description": "How long the pointer must rest on the minimize button before the flyout opens."
+    },
+    "closeGraceMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5000,
+      "default": 260,
+      "description": "Grace period before the flyout closes again after the pointer leaves it."
+    },
+    "showBuiltinItems": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show the built-in text items (minimize, notification area, always on top, ...) below the layouts."
+    },
+    "useWorkArea": {
+      "type": "boolean",
+      "default": true,
+      "description": "true: percentages refer to the work area (without the taskbar). false: to the full monitor area."
+    },
+    "showAllMonitors": {
+      "type": "boolean",
+      "default": true,
+      "description": "true: draw one row per monitor, so a window can be moved across screens. false: only the monitor the window is on."
+    },
+    "buttonDetection": {
+      "type": "string",
+      "enum": ["auto", "hittest", "computed"],
+      "default": "auto",
+      "description": "How the minimize button is located. auto: ask the window and compute the position when it stays silent. hittest: only ask - a window with its own title bar is then not detected. computed: never ask, always compute. Written in lower case here; MinFlyout itself ignores the case."
+    },
+    "traceDetection": {
+      "type": "boolean",
+      "default": false,
+      "description": "Log every gate of the detection, not just the successful ones - answers where a mouse movement dies. One line per change, and only in a build with the logging macros compiled in."
+    },
+    "logToFile": {
+      "type": "boolean",
+      "default": false,
+      "description": "Also write the debug log to minflyout.log next to this file. Only has an effect in builds with logging compiled in."
+    },
+    "layouts": {
+      "type": "array",
+      "description": "Layouts offered in the flyout. Each one is drawn as a miniature of the monitor. An empty array hides the miniature area; a missing property falls back to the built-in layouts.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["zones"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Caption below the miniature."
+          },
+          "monitors": {
+            "description": "Screens this layout is offered on. Omit it for all of them; entries may be mixed. A screen without a single matching layout is left out of the flyout.",
+            "anyOf": [
+              {
+                "$ref": "#/definitions/monitorSelector"
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/definitions/monitorSelector"
+                }
+              }
+            ]
+          },
+          "zones": {
+            "type": "array",
+            "minItems": 1,
+            "description": "The tiles of this layout. Meant to tile the screen without overlapping.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "left": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 99,
+                  "default": 0,
+                  "description": "Left edge in percent of the monitor."
+                },
+                "top": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 99,
+                  "default": 0,
+                  "description": "Top edge in percent of the monitor."
+                },
+                "width": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 100,
+                  "default": 50,
+                  "description": "Width in percent of the monitor."
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 100,
+                  "default": 100,
+                  "description": "Height in percent of the monitor."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
