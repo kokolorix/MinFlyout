@@ -142,13 +142,16 @@
     <Image Include="res\minflyout.ico">
       <Filter>Resources</Filter>
     </Image>
-    <Image Include="res\happy_mignion_compose_windows_on_screen.png">
-      <Filter>Resources</Filter>
-    </Image>
     <Image Include="res\MinFlyout48.png">
       <Filter>Resources</Filter>
     </Image>
     <Image Include="res\MinFlyout256.png">
+      <Filter>Resources</Filter>
+    </Image>
+    <Image Include="res\happy_mignion_compose_windows_on_screen_dark.png">
+      <Filter>Resources</Filter>
+    </Image>
+    <Image Include="res\happy_mignion_compose_windows_on_screen_light.png">
       <Filter>Resources</Filter>
     </Image>
   </ItemGroup>
@@ -166,6 +169,9 @@
     <None Include="CMakeLists.txt" />
     <None Include=".claudiaideconfig">
       <Filter>Resources</Filter>
+    </None>
+    <None Include="$(APPDATA)\$(ProjectName)\config.jsonc">
+      <Filter>Configuration</Filter>
     </None>
   </ItemGroup>
 </Project>
