@@ -135,6 +135,22 @@ private:
     void WriteDiagnosis();
 
     /**
+     * \brief Measures a window and puts its zone on the clipboard.
+     *
+     * Bound to Ctrl+Alt+F11 and to the matching tray menu entry: drag a window
+     * to where it belongs, press the hotkey, and the line
+     * <code>{ "left": ..., "top": ..., "width": ..., "height": ... },</code>
+     * is ready to be pasted into a \c "zones" array. It is the counterpart of
+     * \ref mfly::ApplyZone, so what gets pasted reproduces what was measured.
+     *
+     * \param window Window to measure - the foreground window for the hotkey,
+     *        the window that was in front when the tray menu opened for the menu
+     *        entry. When that one cannot be measured (our own window, the shell,
+     *        minimized) the window under the cursor is tried instead.
+     */
+    void CaptureZone(HWND window);
+
+    /**
      * \brief Watchdog for the mouse hook, run by the poll timer.
      *
      * Compares the cursor position with the number of movements the hook has
@@ -250,6 +266,16 @@ private:
 
     ProbeMode probeMode_ = ProbeMode::Auto;  ///< Resolved Config::buttonDetection.
     bool hotkeyOk_ = false;             ///< Ctrl+Alt+F12 could be registered.
+    bool hotkeyZoneOk_ = false;         ///< Ctrl+Alt+F11 could be registered.
+
+    /**
+     * \brief Foreground window at the moment the tray menu was opened.
+     *
+     * \ref ShowTrayMenu has to call \c SetForegroundWindow on our own window so
+     * the menu closes properly, which destroys the answer \ref CaptureZone
+     * needs. So it is remembered one line before that happens.
+     */
+    HWND menuTarget_ = nullptr;
 
     POINT     watchdogPt_{-32000, -32000};  ///< Cursor position at the last watchdog tick.
     unsigned long long watchdogMoves_ = 0;  ///< HookThread::MovesSeen at that tick.

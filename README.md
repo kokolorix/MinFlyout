@@ -99,6 +99,31 @@ If the `layouts` section is missing entirely, five built-in layouts are used (ha
 large + two, quarters, full screen). An explicitly empty list `[]` hides the miniature area
 and leaves only the text items.
 
+### Writing a zone down without counting pixels
+
+Guessing percentages for a zone is tedious, so there is a hotkey for it. Drag a window to
+where it belongs, size it by hand, and press **Ctrl+Alt+F11** — the line
+
+```jsonc
+        { "left": 2.03, "top": 65.74, "width": 96.15, "height": 28.7 },
+```
+
+is on the clipboard, indented and with the trailing comma already in place, ready to be pasted
+between two zones. A balloon shows what was copied. The tray menu entry *Copy zone of the
+active window* does the same for the window that was in front when the menu opened, which is
+the way out when Ctrl+Alt+F11 already belongs to something else.
+
+Measured is the **foreground window**; if that one cannot be measured — our own flyout has the
+focus, the window is minimized — the window under the cursor is used instead. What gets
+measured is the *visible* frame, the same rectangle `ApplyZone` positions, so the invisible
+shadow border cancels out and pasting the line back reproduces the window exactly. The
+reference area follows `useWorkArea`, so the numbers mean the same thing they do everywhere
+else in the file.
+
+Values are rounded to two decimals with trailing zeros dropped, and clamped to the ranges the
+parser accepts (`left`/`top` 0–99, `width`/`height` 1–100) — a window hanging over the edge of
+its screen would otherwise produce a line the next load silently corrects.
+
 ### How the button is located
 
 `buttonDetection` chooses how MinFlyout finds the minimize button of a foreign window.
@@ -268,7 +293,7 @@ it off — worth knowing if `%APPDATA%` is redirected to a share that reports no
 | `src/Log.*` | `WRITE_*_LOG` macros, debugger output and optional log file |
 | `src/Monitors.*` | enumerates the monitors shown in the flyout |
 | `src/MonitorSelector.*` | which screens a layout applies to; free of Windows dependencies |
-| `src/WindowSizer.*` | zone + monitor → screen coordinates, DWM frame correction |
+| `src/WindowSizer.*` | zone + monitor → screen coordinates and back, DWM frame correction |
 | `src/TrayStash.*` | “minimize to notification area” including restore |
 | `tests/JsonTest.cpp` | 40 checks for the parser, without a test framework |
 | `tests/SelectorTest.cpp` | 33 checks for the monitor selectors |
@@ -401,9 +426,12 @@ and dependency graphs.
 * Clicking the button itself minimizes as usual.
 * A window without a sizing border (`WS_THICKFRAME`) cannot be tiled; for those the miniature
   area is omitted and only the text items appear.
+* **Ctrl+Alt+F11** copies the zone of the active window as one ready-to-paste configuration
+  line; **Ctrl+Alt+F12** writes the detection diagnosis for the window under the cursor.
 * Tray icon: **double click reloads the configuration** (the default action, shown in bold in
   the menu). Right click opens the menu: *Paused*, *Restore all stashed windows*,
-  *Open configuration*, *Reload configuration*, *Exit*.
+  *Open configuration*, *Reload configuration*, *Copy zone of the active window*,
+  *Open diagnosis file*, *Exit*.
 
 Items shipped alongside the configured sizes: Minimize · Minimize to notification area ·
 Always on top · Minimize all windows of this app · Minimize other windows · Show desktop.

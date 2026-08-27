@@ -92,8 +92,12 @@
   </ItemGroup>
   <ItemGroup>
     <!-- application icon and version info -->
+    <Image Include="res\MinFlyout256.png" />
+    <Image Include="res\MinFlyout48.png" />
     <ResourceCompile Include="res\minflyout.rc" />
+    <Image Include="res\happy_mignion_compose_windows_on_screen.png" />
     <Image Include="res\minflyout.ico" />
+    <None Include=".claudiaideconfig" />
     <None Include="res\icon.svg" />
     <None Include="res\config.schema.json" />
     <None Include="tools\build_icon.py" />

@@ -27,13 +27,31 @@ constexpr UINT kMenuRestoreAll = 101;///< Menu command: restore stashed windows.
 constexpr UINT kMenuOpenConfig = 102;///< Menu command: open configuration.
 constexpr UINT kMenuReloadConfig = 103;  ///< Menu command: reload configuration.
 constexpr UINT kMenuOpenDiagnosis = 105; ///< Menu command: open the diagnosis file.
+constexpr UINT kMenuCopyZone = 106;  ///< Menu command: copy the zone of the active window.
 constexpr UINT kMenuExit = 104;      ///< Menu command: exit.
 
 /// ID of the diagnosis hotkey (Ctrl+Alt+F12).
 constexpr int kHotkeyDiagnose = 1;
 
+/// ID of the zone capture hotkey (Ctrl+Alt+F11).
+constexpr int kHotkeyCaptureZone = 2;
+
 /// Poll ticks with cursor movement but no hook report before reviving the hook.
 constexpr int kWatchdogStrikes = 3;
+
+/**
+ * \brief Reports whether a window is worth measuring for a zone.
+ *
+ * \ref IsIgnoredWindow already covers our own windows, the shell and everything
+ * cloaked or invisible; minimized is added here, because the rectangle of a
+ * minimized window says nothing about where the user put it.
+ *
+ * \param window Candidate window.
+ * \return \c true if the window can be measured.
+ */
+bool IsMeasurable(HWND window) {
+    return window && ::IsWindow(window) && !::IsIconic(window) && !IsIgnoredWindow(window);
+}
 
 }  // namespace
 
@@ -117,6 +135,15 @@ bool AppController::Init(HINSTANCE instance) {
                           log::dformat(L"error {}", ::GetLastError()));
     }
 
+    // Zone capture, same deal: nice to have, never a reason not to start.
+    hotkeyZoneOk_ = ::RegisterHotKey(hwnd_, kHotkeyCaptureZone,
+                                     MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F11) != FALSE;
+    if (!hotkeyZoneOk_) {
+        WRITE_WARNING_LOG(L"Ctrl+Alt+F11 is taken, the zone capture hotkey is unavailable; "
+                          L"the tray menu entry keeps working",
+                          log::dformat(L"error {}", ::GetLastError()));
+    }
+
     WRITE_INFO_LOG(log::dformat(L"MinFlyout started, build {}", BuildStamp()),
                    log::dformat(L"pid {}", ::GetCurrentProcessId()));
     return true;
@@ -127,6 +154,10 @@ void AppController::Shutdown() {
     if (hotkeyOk_) {
         ::UnregisterHotKey(hwnd_, kHotkeyDiagnose);
         hotkeyOk_ = false;
+    }
+    if (hotkeyZoneOk_) {
+        ::UnregisterHotKey(hwnd_, kHotkeyCaptureZone);
+        hotkeyZoneOk_ = false;
     }
     CloseFlyout(false);
     hooks_.Stop();
@@ -311,6 +342,50 @@ void AppController::WriteDiagnosis() {
     ShowTrayBalloon(L"MinFlyout diagnosis", text, !copied && !wrote);
 
     WRITE_INFO_LOG(L"Diagnosis written", report);
+}
+
+void AppController::CaptureZone(HWND window) {
+    // The foreground window is the one the user just arranged. If it is not
+    // measurable - our own flyout has the focus, the shell does, the window is
+    // minimized - fall back to whatever the cursor points at, which is what the
+    // diagnosis hotkey uses and needs no click beforehand.
+    if (!IsMeasurable(window)) {
+        POINT pt{};
+        ::GetCursorPos(&pt);
+        HWND under = ::WindowFromPoint(pt);
+        window = under ? ::GetAncestor(under, GA_ROOT) : nullptr;
+    }
+
+    Zone zone{};
+    const bool measured =
+        IsMeasurable(window) &&
+        ZoneFromWindow(window, ConfigStore::Instance().current().useWorkArea, zone);
+    if (!measured) {
+        ShowTrayBalloon(L"MinFlyout",
+                        L"No window to measure. Bring the window you want to capture "
+                        L"to the front - a minimized one cannot be measured.", true);
+        WRITE_WARNING_LOG(L"Zone capture found no measurable window");
+        return;
+    }
+
+    const std::wstring line = FormatZoneEntry(zone);
+
+    // The balloon shows the line without its indentation and line break, so the
+    // result is visible without opening the configuration first.
+    std::wstring shown = line;
+    while (!shown.empty() && (shown.back() == L'\r' || shown.back() == L'\n')) shown.pop_back();
+    const size_t first = shown.find_first_not_of(L' ');
+    if (first != std::wstring::npos) shown.erase(0, first);
+
+    if (CopyToClipboard(line)) {
+        ShowTrayBalloon(L"Zone copied", shown + L"\nPaste it into a \"zones\" array.", false);
+    } else {
+        // Without the clipboard the numbers would be lost, so the balloon is
+        // the only place left to put them.
+        ShowTrayBalloon(L"Zone (clipboard unavailable)", shown, true);
+    }
+
+    WRITE_INFO_LOG(log::dformat(L"Zone captured: {}", shown), log::Describe(window));
 }
 
 void AppController::OpenDiagnosisFile() {
@@ -522,10 +597,10 @@ void AppController::AddAppTrayIcon() {
     // The tooltip is the only place the double click and the hotkey can be
     // discovered - and the build stamp answers "am I running what I just built?"
     // without opening a single file.
-    wchar_t tip[128] = {};
+    wchar_t tip[160] = {};
     ::swprintf(tip, ARRAYSIZE(tip),
                L"MinFlyout  %s\nDouble click reloads the configuration"
-               L"\nCtrl+Alt+F12: diagnose window",
+               L"\nCtrl+Alt+F12 diagnose  Ctrl+Alt+F11 copy zone",
                BuildStamp());
     ::lstrcpynW(nid.szTip, tip, ARRAYSIZE(nid.szTip));
     ::Shell_NotifyIconW(NIM_ADD, &nid);
@@ -599,6 +674,11 @@ void AppController::ShowTrayBalloon(const wchar_t* title, const std::wstring& te
 }
 
 void AppController::ShowTrayMenu() {
+    // Before anything else: SetForegroundWindow below makes our own window the
+    // foreground one, and "Copy zone of the active window" would then measure
+    // an invisible 0x0 window instead of the one the user means.
+    menuTarget_ = ::GetForegroundWindow();
+
     HMENU menu = ::CreatePopupMenu();
     if (!menu) return;
 
@@ -608,6 +688,8 @@ void AppController::ShowTrayMenu() {
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     ::AppendMenuW(menu, MF_STRING, kMenuOpenConfig, L"Open configuration");
     ::AppendMenuW(menu, MF_STRING, kMenuReloadConfig, L"Reload configuration");
+    ::AppendMenuW(menu, MF_STRING, kMenuCopyZone,
+                  L"Copy zone of the active window\t Ctrl+Alt+F11");
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     ::AppendMenuW(menu, MF_STRING, kMenuOpenDiagnosis,
                   L"Open diagnosis file\t Ctrl+Alt+F12 writes it");
@@ -687,7 +769,11 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
 
     case WM_HOTKEY:
-        if (static_cast<int>(wParam) == kHotkeyDiagnose) WriteDiagnosis();
+        switch (static_cast<int>(wParam)) {
+        case kHotkeyDiagnose:    WriteDiagnosis(); return 0;
+        case kHotkeyCaptureZone: CaptureZone(::GetForegroundWindow()); return 0;
+        default: break;
+        }
         return 0;
 
     case WM_COMMAND:
@@ -697,6 +783,7 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case kMenuOpenConfig:   ConfigStore::Instance().OpenInEditor(); return 0;
         case kMenuReloadConfig: ReloadConfig(); return 0;
         case kMenuOpenDiagnosis: OpenDiagnosisFile(); return 0;
+        case kMenuCopyZone:     CaptureZone(menuTarget_); return 0;
         case kMenuExit:         ::PostQuitMessage(0); return 0;
         default: break;
         }

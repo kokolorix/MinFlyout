@@ -102,6 +102,27 @@
  * A missing \c layouts section falls back to \ref mfly::DefaultLayouts; an
  * explicitly empty list hides the miniature area and leaves the text items.
  *
+ * \subsection main_capture Writing a zone down without counting pixels
+ *
+ * Guessing percentages is tedious, so **Ctrl+Alt+F11** does it the other way
+ * round: arrange a window by hand and the line
+ *
+ * ```
+ *         { "left": 2.03, "top": 65.74, "width": 96.15, "height": 28.7 },
+ * ```
+ *
+ * lands on the clipboard, indented and with its trailing comma, ready to be
+ * pasted between two zones. The tray menu entry *Copy zone of the active window*
+ * does the same for the window that was in front when the menu opened - the way
+ * out when the hotkey belongs to something else.
+ *
+ * \ref mfly::ZoneFromWindow is the exact inverse of \ref mfly::ApplyZone: it
+ * measures the visible frame, the same rectangle \c ApplyZone positions, so the
+ * invisible shadow border cancels out and the pasted line reproduces the window
+ * it was taken from. \ref mfly::AppController::CaptureZone measures the
+ * foreground window and falls back to the one under the cursor where that is not
+ * measurable.
+ *
  * \subsection main_monitor_layouts Layouts for one screen
  *
  * Thirds are useful on an ultrawide panel and cramped on a laptop screen, so a
@@ -298,10 +319,16 @@
  * Leaving it, clicking elsewhere or ESC closes it again; a click on the button
  * itself minimizes as usual.
  *
+ * Two hotkeys work anywhere: **Ctrl+Alt+F11** copies the zone of the active
+ * window as a configuration line (\ref main_capture), **Ctrl+Alt+F12** writes
+ * the detection diagnosis for the window under the cursor
+ * (\ref main_diagnosis).
+ *
  * A double click on the tray icon reloads the configuration - that is the
  * default action of the icon, and the menu marks the same command in bold. A
  * right click opens the menu: *Paused*, *Restore all stashed windows*,
- * *Open configuration*, *Reload configuration* and *Exit*.
+ * *Open configuration*, *Reload configuration*, *Copy zone of the active
+ * window*, *Open diagnosis file* and *Exit*.
  *
  * \section main_limits Limits
  *

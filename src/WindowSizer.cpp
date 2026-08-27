@@ -1,11 +1,12 @@
 /**
  * \file WindowSizer.cpp
  * \ingroup config
- * \brief Conversion of percentage values into screen coordinates.
+ * \brief Conversion of percentage values into screen coordinates, and back.
  */
 #include "WindowSizer.h"
 
 #include <algorithm>
+#include <format>
 
 #include "Log.h"
 
@@ -43,6 +44,26 @@ RECT InvisibleBorders(HWND window) {
         return RECT{0, 0, 0, 0};
     }
     return padding;
+}
+
+/**
+ * \brief Formats one percentage the way the configuration file spells it.
+ *
+ * Two decimals, then trailing zeros and a bare decimal point are dropped: a
+ * window on an exact half yields \c "50" and not \c "50.00". \c std::format
+ * without \c {:L} is locale-independent, so the separator stays a point even
+ * where the user's locale spells it as a comma - which JSON would not accept.
+ *
+ * \param value Percentage.
+ * \return The number as text.
+ */
+std::wstring Percent(double value) {
+    std::wstring text = std::format(L"{:.2f}", value);
+    if (text.find(L'.') == std::wstring::npos) return text;
+
+    while (!text.empty() && text.back() == L'0') text.pop_back();
+    if (!text.empty() && text.back() == L'.') text.pop_back();
+    return text;
 }
 
 }  // namespace
@@ -99,6 +120,60 @@ bool ApplyZone(HWND window, const Zone& zone, HMONITOR monitor, bool useWorkArea
                         log::Describe(window));
     }
     return ok;
+}
+
+bool ZoneFromWindow(HWND window, bool useWorkArea, Zone& zone, HMONITOR* monitor) {
+    if (!window || !::IsWindow(window)) return false;
+
+    // A minimized window keeps the rectangle it had before, but the frame DWM
+    // reports for it is meaningless - measuring it would hand out a zone that
+    // has nothing to do with what the user sees.
+    if (::IsIconic(window)) return false;
+
+    HMONITOR mon = ::MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (!::GetMonitorInfoW(mon, &info)) {
+        WRITE_WARNING_LOG(L"GetMonitorInfo failed while capturing a zone",
+                          log::Describe(window));
+        return false;
+    }
+
+    // The counterpart of the invisible-border correction in ApplyZone: that one
+    // positions the visible frame, so this one measures the visible frame.
+    RECT frame{};
+    if (!VisibleFrame(window, frame)) return false;
+
+    const RECT area = useWorkArea ? info.rcWork : info.rcMonitor;
+    const double areaWidth = static_cast<double>(area.right - area.left);
+    const double areaHeight = static_cast<double>(area.bottom - area.top);
+    if (areaWidth <= 0.0 || areaHeight <= 0.0) return false;
+
+    // Same ranges the parser clamps a loaded zone to, so a captured line comes
+    // back out of the file exactly as it went in.
+    zone.left   = std::clamp((frame.left - area.left) * 100.0 / areaWidth, 0.0, 99.0);
+    zone.top    = std::clamp((frame.top - area.top) * 100.0 / areaHeight, 0.0, 99.0);
+    zone.width  = std::clamp((frame.right - frame.left) * 100.0 / areaWidth, 1.0, 100.0);
+    zone.height = std::clamp((frame.bottom - frame.top) * 100.0 / areaHeight, 1.0, 100.0);
+
+    if (monitor) *monitor = mon;
+
+    WRITE_DEBUG_LOG(log::dformat(L"Zone captured: {:.2f},{:.2f} {:.2f}x{:.2f} %",
+                                 zone.left, zone.top, zone.width, zone.height),
+                    log::dformat(L"frame {},{},{},{}  area {},{},{},{}",
+                                 frame.left, frame.top, frame.right, frame.bottom,
+                                 area.left, area.top, area.right, area.bottom));
+    return true;
+}
+
+std::wstring FormatZoneEntry(const Zone& zone) {
+    // Eight blanks of indentation and the trailing comma are what the "zones"
+    // arrays of the template look like - the line is meant to be pasted, not
+    // reformatted afterwards.
+    return std::format(L"        {{ \"left\": {}, \"top\": {}, "
+                       L"\"width\": {}, \"height\": {} }},\r\n",
+                       Percent(zone.left), Percent(zone.top),
+                       Percent(zone.width), Percent(zone.height));
 }
 
 }  // namespace mfly
