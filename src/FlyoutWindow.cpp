@@ -460,7 +460,10 @@ void FlyoutWindow::PaintMonitorRow(HDC dc, size_t rowIndex) {
             const RECT tile = ZoneRect(mini, zone, Scale(kZoneGap, dpi_));
             const bool hot = static_cast<int>(spot) == hotZone_;
             if(!hot)
+				{
 					FillRounded(dc, tile, pal.zone, Scale(2, dpi_));
+					FrameRounded(dc, tile, pal.border, Scale(2, dpi_));
+				}
             ++spot;
         }
 
@@ -491,7 +494,7 @@ void FlyoutWindow::PaintMonitorRow(HDC dc, size_t rowIndex) {
 			  if (hot)
 			  {
 				  FillRounded(dc, tile, pal.accent, Scale(2, dpi_));
-				  FrameRounded(dc, tile, pal.border, Scale(2, dpi_));
+				  FrameRounded(dc, tile, pal.border, Scale(2, dpi_), Scale(2, dpi_));
 			  }
 			  ++spot;
         }
