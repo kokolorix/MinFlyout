@@ -113,8 +113,8 @@ void FillRounded(HDC dc, const RECT& r, COLORREF color, int radius) {
 }
 
 /// Draws the outline of a rounded rectangle.
-void FrameRounded(HDC dc, const RECT& r, COLORREF color, int radius) {
-    HPEN pen = ::CreatePen(PS_SOLID, 1, color);
+void FrameRounded(HDC dc, const RECT& r, COLORREF color, int radius, int width = 1) {
+    HPEN pen = ::CreatePen(PS_SOLID, width, color);
     HGDIOBJ oldPen = ::SelectObject(dc, pen);
     HGDIOBJ oldBrush = ::SelectObject(dc, ::GetStockObject(NULL_BRUSH));
     ::RoundRect(dc, r.left, r.top, r.right, r.bottom, radius * 2, radius * 2);
