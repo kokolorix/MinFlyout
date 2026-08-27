@@ -22,7 +22,7 @@
     <VCProjectVersion>17.0</VCProjectVersion>
     <ProjectGuid>{95D14441-17BA-46D6-8821-D05A934B7308}</ProjectGuid>
     <RootNamespace>MinFlyout</RootNamespace>
-    <ProjectName>minflyout</ProjectName>
+    <ProjectName>MinFlyout</ProjectName>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
