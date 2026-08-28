@@ -19,8 +19,12 @@ add_executable(minflyout WIN32
     src/CaptionProbe.cpp
     src/CaptionGeometry.cpp
     src/Diagnostics.cpp
+    src/DragWatcher.cpp
     src/HookThread.cpp
     src/FlyoutWindow.cpp
+    src/OverlayGeometry.cpp
+    src/Painting.cpp
+    src/ZoneOverlay.cpp
     src/ItemRegistry.cpp
     src/BuiltinProviders.cpp
     src/TrayStash.cpp
@@ -78,6 +82,23 @@ else()
 endif()
 
 add_test(NAME units COMMAND json_tests)
+
+# The overlay arithmetic, likewise free of Windows dependencies. Its own target
+# because it carries its own main; fold it into json_tests once the three
+# sources above are back in the working tree.
+add_executable(overlay_tests
+    tests/OverlayGeometryTest.cpp
+    src/OverlayGeometry.cpp
+)
+target_include_directories(overlay_tests PRIVATE src)
+target_compile_definitions(overlay_tests PRIVATE UNICODE _UNICODE)
+if(MSVC)
+    target_compile_options(overlay_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(overlay_tests PRIVATE -Wall -Wextra)
+endif()
+
+add_test(NAME overlay COMMAND overlay_tests)
 
 # ---------------------------------------------------------------------------
 # Documentation:  cmake --build build --target docs

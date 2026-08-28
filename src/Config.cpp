@@ -46,6 +46,14 @@ constexpr const char* kTemplate =
     "  // false = only show the monitor the window is currently on\n"
     "  \"showAllMonitors\": true,\n"
     "\n"
+    "  // Size factor of the flyout, on top of the scaling Windows already does.\n"
+    "  // Windows sizes it for the resolution of the screen, which on a small\n"
+    "  // panel means small - correct in millimetres and awkward to hit. 1.0 is\n"
+    "  // the normal size; 1.4 is a good starting point on a laptop screen.\n"
+    "  // Fonts, paddings and miniatures grow together, and the factor is walked\n"
+    "  // back where the result would not fit on the screen. Range 0.75 to 3.\n"
+    "  \"uiScale\": 1.0,\n"
+    "\n"
     "  // How the minimize button is located.\n"
     "  //   \"auto\"      ask the window, and compute the position when it stays\n"
     "  //               silent - which is what apps with their own title bar do\n"
@@ -127,6 +135,49 @@ constexpr const char* kTemplate =
     "      ],\n"
     "    },\n"
     "  ],\n"
+    "\n"
+    "  // Dragging a window into a zone with the finger.\n"
+    "  //\n"
+    "  // Pick up a window by its title bar and move it. A field appears where\n"
+    "  // \"trigger\" puts it; rest the finger in it for \"dwellMs\" and the zones\n"
+    "  // below unfold across the screen. Let go over one of them and the window\n"
+    "  // lands there; let go anywhere else and nothing happens.\n"
+    "  //\n"
+    "  // Touch gets its own layouts because the task is a different one: with a\n"
+    "  // window already in mid-drag there is exactly one arrangement on offer,\n"
+    "  // not a menu of five. The first layout matching the monitor is the one\n"
+    "  // that shows - which is also how a tablet gets one arrangement upright\n"
+    "  // and another on its side, through \"monitors\". Leave \"layouts\" out\n"
+    "  // entirely and the ones above are used instead.\n"
+    "  \"touch\": {\n"
+    "    \"enabled\": true,\n"
+    "\n"
+    "    // React to a window dragged with the mouse as well. Off by default -\n"
+    "    // with a mouse the flyout is the shorter way. Turn it on to try the\n"
+    "    // overlay out on a machine without a touchscreen.\n"
+    "    \"alsoMouse\": false,\n"
+    "\n"
+    "    // How long the finger has to rest in the field before the zones unfold.\n"
+    "    // Too short and merely carrying a window across the middle of the screen\n"
+    "    // opens them.\n"
+    "    \"dwellMs\": 250,\n"
+    "\n"
+    "    // The field, in percent of the same reference area the zones use. The\n"
+    "    // default is a fifth of the screen in its middle; it is only on screen\n"
+    "    // while a window is actually being dragged, so it may be generous.\n"
+    "    \"trigger\": { \"left\": 40, \"top\": 40, \"width\": 20, \"height\": 20 },\n"
+    "\n"
+    "    \"layouts\": [\n"
+    "      {\n"
+    "        \"name\": \"Touch\",\n"
+    "        \"zones\": [\n"
+    "          { \"left\":  0, \"top\":  0, \"width\": 50, \"height\": 100 },\n"
+    "          { \"left\": 50, \"top\":  0, \"width\": 50, \"height\":  50 },\n"
+    "          { \"left\": 50, \"top\": 50, \"width\": 50, \"height\":  50 },\n"
+    "        ],\n"
+    "      },\n"
+    "    ],\n"
+    "  },\n"
     "}\n";
 
 /**
@@ -260,6 +311,103 @@ void ReadMonitorSelectors(const json::Value& entry, Layout& layout) {
     }
 }
 
+/**
+ * \brief Reads one zone object.
+ *
+ * The ranges are the ones \ref mfly::ZoneFromWindow clamps a measured zone to,
+ * so a line written by Ctrl+Alt+F11 comes back out of the file unchanged.
+ *
+ * \param[in]  value The object.
+ * \param[out] zone  Written only on \c true.
+ * \return \c false for anything that is not a usable zone.
+ */
+bool ReadZone(const json::Value& value, Zone& zone) {
+    if (!value.is(json::Value::Type::Object)) return false;
+
+    zone.left   = ClampPercent(value.number(L"left", 0.0), 0.0, 99.0);
+    zone.top    = ClampPercent(value.number(L"top", 0.0), 0.0, 99.0);
+    zone.width  = ClampPercent(value.number(L"width", 50.0), 1.0, 100.0);
+    zone.height = ClampPercent(value.number(L"height", 100.0), 1.0, 100.0);
+    return zone.valid();
+}
+
+/**
+ * \brief Reads an array of layout objects.
+ *
+ * Shared by \c "layouts" and \c "touch.layouts": the two sections have the same
+ * shape, and a zone written for the one has to mean the same thing in the other.
+ * Entries without a single usable zone are dropped silently, as before - a
+ * malformed layout is not worth refusing the whole file over.
+ *
+ * \param[in]  array The array value.
+ * \param[out] out   Replaced by what was read.
+ */
+void ReadLayouts(const json::Value& array, std::vector<Layout>& out) {
+    std::vector<Layout> parsed;
+
+    for (const json::Value& entry : array.elements()) {
+        if (!entry.is(json::Value::Type::Object)) continue;
+
+        Layout layout;
+        layout.name = entry.text(L"name");
+        ReadMonitorSelectors(entry, layout);
+
+        const json::Value* zones = entry.find(L"zones");
+        if (!zones || !zones->is(json::Value::Type::Array)) continue;
+
+        for (const json::Value& z : zones->elements()) {
+            Zone zone;
+            if (ReadZone(z, zone)) layout.zones.push_back(zone);
+        }
+        if (!layout.zones.empty()) parsed.push_back(std::move(layout));
+    }
+    out = std::move(parsed);
+}
+
+/**
+ * \brief Reads the \c "touch" section.
+ *
+ * A missing section leaves the defaults in place, so an existing configuration
+ * keeps working and gains the drag-to-zone behaviour with the built-in trigger
+ * field in the middle of the screen.
+ *
+ * \param[in]  root The configuration object.
+ * \param[out] out  Target configuration.
+ * \return \c false with Config::error set if the section is malformed.
+ */
+bool ReadTouch(const json::Value& root, Config& out) {
+    const json::Value* touch = root.find(L"touch");
+    if (!touch) return true;
+    if (!touch->is(json::Value::Type::Object)) {
+        out.error = L"\"touch\" must be an object.";
+        return false;
+    }
+
+    out.touch.enabled = touch->boolean(L"enabled", true);
+    out.touch.alsoMouse = touch->boolean(L"alsoMouse", false);
+    out.touch.dwellMs = static_cast<UINT>(
+        ClampPercent(touch->number(L"dwellMs", kTouchDwellMs), 0, 5000));
+
+    if (const json::Value* trigger = touch->find(L"trigger")) {
+        Zone zone;
+        if (!ReadZone(*trigger, zone)) {
+            out.error = L"\"touch.trigger\" must be an object with left, top, "
+                        L"width and height.";
+            return false;
+        }
+        out.touch.trigger = zone;
+    }
+
+    if (const json::Value* layouts = touch->find(L"layouts")) {
+        if (!layouts->is(json::Value::Type::Array)) {
+            out.error = L"\"touch.layouts\" must be an array.";
+            return false;
+        }
+        ReadLayouts(*layouts, out.touch.layouts);
+    }
+    return true;
+}
+
 }  // namespace
 
 std::vector<Layout> DefaultLayouts() {
@@ -357,6 +505,7 @@ bool ConfigStore::ParseInto(const std::wstring& text, Config& out) {
     out.traceDetection = root.boolean(L"traceDetection", false);
 
     out.showAllMonitors = root.boolean(L"showAllMonitors", true);
+    out.uiScale = ClampPercent(root.number(L"uiScale", 1.0), kMinUiScale, kMaxUiScale);
 
     const std::wstring detection = root.text(L"buttonDetection", L"auto");
     ProbeMode mode = ProbeMode::Auto;
@@ -367,6 +516,8 @@ bool ConfigStore::ParseInto(const std::wstring& text, Config& out) {
         return false;
     }
 
+    if (!ReadTouch(root, out)) return false;
+
     const json::Value* layouts = root.find(L"layouts");
     if (!layouts) return true;  // no section: keep the defaults
     if (!layouts->is(json::Value::Type::Array)) {
@@ -374,32 +525,8 @@ bool ConfigStore::ParseInto(const std::wstring& text, Config& out) {
         return false;
     }
 
-    std::vector<Layout> parsed;
-    for (const json::Value& entry : layouts->elements()) {
-        if (!entry.is(json::Value::Type::Object)) continue;
-
-        Layout layout;
-        layout.name = entry.text(L"name");
-        ReadMonitorSelectors(entry, layout);
-
-        const json::Value* zones = entry.find(L"zones");
-        if (!zones || !zones->is(json::Value::Type::Array)) continue;
-
-        for (const json::Value& z : zones->elements()) {
-            if (!z.is(json::Value::Type::Object)) continue;
-
-            Zone zone;
-            zone.left   = ClampPercent(z.number(L"left", 0.0), 0.0, 99.0);
-            zone.top    = ClampPercent(z.number(L"top", 0.0), 0.0, 99.0);
-            zone.width  = ClampPercent(z.number(L"width", 50.0), 1.0, 100.0);
-            zone.height = ClampPercent(z.number(L"height", 100.0), 1.0, 100.0);
-            if (zone.valid()) layout.zones.push_back(zone);
-        }
-        if (!layout.zones.empty()) parsed.push_back(std::move(layout));
-    }
-
     // An explicitly empty list is a valid setting - then only the text items show.
-    out.layouts = std::move(parsed);
+    ReadLayouts(*layouts, out.layouts);
     return true;
 }
 

@@ -55,6 +55,47 @@ struct Layout {
 };
 
 /**
+ * \brief Everything about dragging a window into a zone by finger.
+ *
+ * Touch is not a mouse with a fat pointer, so it gets its own layouts rather
+ * than a scaled version of the ones the flyout offers. Halves and quarters are
+ * comfortable with a finger; the five-tile arrangements of a wide desktop are
+ * not, and picking one of five miniatures while holding a window in mid-drag is
+ * a different task from picking one with a mouse.
+ *
+ * Which layout appears is decided per monitor by Layout::monitors, exactly as
+ * for the flyout - that is also how a Surface gets one arrangement in landscape
+ * and another in portrait. The first matching layout wins; there is one drop
+ * target, not a menu of them.
+ */
+struct TouchConfig {
+    /// Drag-to-zone active at all.
+    bool enabled = true;
+
+    /**
+     * \brief Also react to a window dragged with the mouse.
+     *
+     * Off by default - with a mouse the flyout is the better route. Worth
+     * turning on to try the overlay out on a machine without a touchscreen.
+     */
+    bool alsoMouse = false;
+
+    /// How long the finger must rest in the trigger field before the zones unfold.
+    UINT dwellMs = kTouchDwellMs;
+
+    /**
+     * \brief Where the trigger field sits, in percent of the reference area.
+     *
+     * The default is a fifth of the screen in its middle. It only exists while
+     * a window is actually being dragged, so it may be generous.
+     */
+    Zone trigger{40.0, 40.0, 20.0, 20.0};
+
+    /// Layouts offered while dragging; empty falls back to Config::layouts.
+    std::vector<Layout> layouts;
+};
+
+/**
  * \brief The complete user configuration.
  */
 struct Config {
@@ -65,7 +106,21 @@ struct Config {
     bool logToFile = false;              ///< Also write the debug log to \c %APPDATA%\\MinFlyout\\minflyout.log.
     bool watchConfig = true;             ///< Reload automatically as soon as the file is saved.
     bool showAllMonitors = true;         ///< Offer every monitor, not just the one the window is on.
+
+    /**
+     * \brief Size factor of the flyout, on top of the DPI scaling.
+     *
+     * Windows sizes the flyout for the resolution of the screen, which on a
+     * small panel means small - correct in millimetres and awkward to hit. This
+     * multiplies the DPI the flyout is laid out for, so fonts, paddings and
+     * miniatures grow together (see \ref mfly::ScaledDpi). Clamped to
+     * \ref mfly::kMinUiScale ... \ref mfly::kMaxUiScale, and reduced further
+     * where the result would not fit on the screen.
+     */
+    double uiScale = 1.0;
+
     std::vector<Layout> layouts;         ///< Configured layouts.
+    TouchConfig touch;                   ///< Drag-to-zone by finger.
 
     /**
      * \brief How the minimize button is located.

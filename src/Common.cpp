@@ -114,6 +114,18 @@ int TitleBarHeight(UINT dpi) {
     return std::max(caption + padded, Scale(32, dpi));
 }
 
+UINT ScaledDpi(UINT dpi, double factor) {
+    const UINT base = dpi ? dpi : 96u;
+
+    // A NaN survives every comparison, so it is caught by asking whether the
+    // value equals itself rather than by clamping it.
+    if (!(factor == factor)) return base;
+
+    const double clamped = std::clamp(factor, kMinUiScale, kMaxUiScale);
+    const UINT scaled = static_cast<UINT>(base * clamped + 0.5);
+    return scaled ? scaled : base;
+}
+
 UINT DpiForWindowCompat(HWND hwnd) {
     static PFN_GetDpiForWindow fn = LoadGetDpiForWindow();
     if (fn && hwnd) {
@@ -125,6 +137,10 @@ UINT DpiForWindowCompat(HWND hwnd) {
 
 UINT DpiForPoint(POINT pt) {
     return DpiFromMonitor(::MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST));
+}
+
+UINT DpiForWindowMonitor(HWND window) {
+    return DpiFromMonitor(::MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST));
 }
 
 bool SystemUsesDarkTheme() {

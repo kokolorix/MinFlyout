@@ -212,7 +212,12 @@ std::wstring DiagnoseWindow(HWND window, POINT pt) {
     ::GetWindowRect(window, &windowRect);
     RECT frame{};
     const bool haveFrame = VisibleFrame(window, frame);
-    const UINT dpi = DpiForWindowCompat(window);
+    // Two different numbers, and telling them apart is what explains a whole
+    // class of failures: the caption arithmetic works in screen pixels, so it
+    // uses the monitor's DPI, while a window that is not per-monitor aware
+    // reports 96 whatever the screen does.
+    const UINT dpi = DpiForWindowMonitor(window);
+    const UINT windowDpi = DpiForWindowCompat(window);
 
     out += L"window under cursor\r\n";
     out += std::format(L"  hwnd             {:#x}\r\n",
@@ -227,7 +232,12 @@ std::wstring DiagnoseWindow(HWND window, POINT pt) {
     out += std::format(L"  window rect      {}\r\n", Fmt(windowRect));
     out += std::format(L"  visible frame    {}{}\r\n", Fmt(frame),
                        haveFrame ? L"" : L"   (GetWindowRect - DWM had no answer)");
-    out += std::format(L"  dpi              {}\r\n", dpi);
+    out += std::format(L"  dpi (screen)     {}\r\n", dpi);
+    out += std::format(L"  dpi (window)     {}{}\r\n", windowDpi,
+                       windowDpi == dpi
+                           ? L""
+                           : L"   - the window is not per-monitor DPI aware; everything "
+                             L"below is measured in screen pixels");
     out += std::format(L"  state            {}{}{}\r\n",
                        ::IsZoomed(window) ? L"maximized " : L"",
                        ::IsIconic(window) ? L"minimized " : L"",
@@ -262,9 +272,35 @@ std::wstring DiagnoseWindow(HWND window, POINT pt) {
     out += std::format(L"  NCHITTEST        {}  {}\r\n", code, HitTestName(code));
 
     RECT strip{};
+    const bool haveStrip = TitleBarStrip(window, strip);
     out += std::format(L"  GetTitleBarInfo  {}\r\n",
-                       TitleBarStrip(window, strip) ? Fmt(strip)
-                                                    : std::wstring(L"no title bar reported"));
+                       haveStrip ? Fmt(strip) : std::wstring(L"no title bar reported"));
+
+    // The strip is the second source of the ladder, and the gate in front of it
+    // is easy to misread from the outside: a window with its own title bar keeps
+    // a vestigial system caption that is far too flat, and believing it would
+    // put the buttons in the wrong place. Showing both the verdict and what the
+    // strip would have produced turns "it does not work" into a rectangle that
+    // can be compared with where the buttons visibly are.
+    if (haveStrip) {
+        const int stripHeight = strip.bottom - strip.top;
+        const bool trusted = stripHeight * 4 >= titleBar * 3;
+        out += std::format(L"  strip trusted    {}\r\n",
+                           trusted
+                               ? std::format(L"yes - {} px against the expected {}",
+                                             stripHeight, titleBar)
+                               : std::format(L"no - {} px is under 3/4 of the expected {}, "
+                                             L"so it is taken for a vestigial caption",
+                                             stripHeight, titleBar));
+
+        RectI fromStrip;
+        const RectI bar{strip.left, strip.top, strip.right, strip.bottom};
+        if (hasMinimize &&
+            CaptionButtonRect(EstimateCaptionBlock(bar, bar.height(), layout), layout,
+                              CaptionButton::Minimize, fromStrip)) {
+            out += std::format(L"  strip would give {}\r\n", Fmt(fromStrip));
+        }
+    }
 
     RECT rawBlock{};
     const bool haveRaw =
@@ -314,6 +350,10 @@ std::wstring DiagnoseWindow(HWND window, POINT pt) {
         out += L"The cursor is outside the caption button region, so the detection stops "
                L"before it asks anybody. Compare 'region' with 'cursor' - if the real buttons "
                L"are somewhere else, that is the reason.";
+        if (windowDpi != dpi) {
+            out += L" Note that the two DPI values differ: if 'region' also looks too small "
+                   L"next to what DWM reports, the region was measured for the wrong scale.";
+        }
     } else if (code == HTMINBUTTON) {
         out += L"The window reports HTMINBUTTON here - detection should work.";
     } else if (computed && PtInRectPt(button, pt)) {

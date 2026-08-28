@@ -8,6 +8,8 @@
 #include <algorithm>
 
 #include "Log.h"
+#include "OverlayGeometry.h"
+#include "Painting.h"
 
 namespace mfly {
 namespace {
@@ -31,119 +33,35 @@ constexpr int kAnchorGap    = 4;   ///< Gap between button and flyout.
 constexpr int kMinMiniH     = 40;  ///< Lower bound for very wide monitors.
 /** @} */
 
-/// Colors of one theme.
-struct Palette {
-    COLORREF background;    ///< Window background.
-    COLORREF border;        ///< Window and miniature border.
-    COLORREF text;          ///< Normal text.
-    COLORREF textDim;       ///< Captions, disabled items.
-    COLORREF hover;         ///< Hovered item row.
-    COLORREF separator;     ///< Separator line.
-    COLORREF miniBack;      ///< Background of a miniature (the "screen").
-    COLORREF zone;          ///< A zone tile.
-    COLORREF accent;        ///< Hovered zone.
-};
-
 /**
- * \brief Reads the system accent color.
+ * \brief Margin the flyout keeps to the edges of the work area, in real pixels.
  *
- * Uses \c DwmGetColorizationColor so the highlighted zone matches what Windows
- * paints elsewhere; falls back to the blue of the application icon.
- *
- * \return Accent color as \c COLORREF.
+ * Not scaled: it exists so the window does not sit flush against a screen edge,
+ * and that is a property of the screen rather than of the content.
  */
-COLORREF AccentColor() {
-    using PFN_DwmGetColorizationColor = HRESULT(WINAPI*)(DWORD*, BOOL*);
-    static PFN_DwmGetColorizationColor fn = [] {
-        HMODULE dwm = ::LoadLibraryW(L"dwmapi.dll");
-        return dwm ? reinterpret_cast<PFN_DwmGetColorizationColor>(
-                         reinterpret_cast<void*>(
-                             ::GetProcAddress(dwm, "DwmGetColorizationColor")))
-                   : nullptr;
-    }();
-
-    DWORD argb = 0;
-    BOOL opaque = FALSE;
-    if (fn && SUCCEEDED(fn(&argb, &opaque))) {
-        return RGB((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
-    }
-    return RGB(59, 130, 246);  // #3B82F6
-}
-
-/**
- * \brief Builds the palette for the current theme.
- * \param dark \c true for dark mode.
- * \return The palette.
- */
-Palette MakePalette(bool dark) {
-    Palette p{};
-    p.accent = AccentColor();
-    if (dark) {
-        p.background = RGB(43, 43, 43);
-        p.border     = RGB(69, 69, 69);
-        p.text       = RGB(255, 255, 255);
-        p.textDim    = RGB(150, 150, 150);
-        p.hover      = RGB(64, 64, 64);
-        p.separator  = RGB(69, 69, 69);
-        p.miniBack   = RGB(32, 32, 32);
-        p.zone       = RGB(90, 90, 90);
-    } else {
-        p.background = RGB(249, 249, 249);
-        p.border     = RGB(214, 214, 214);
-        p.text       = RGB(26, 26, 26);
-        p.textDim    = RGB(120, 120, 120);
-        p.hover      = RGB(234, 234, 234);
-        p.separator  = RGB(222, 222, 222);
-        p.miniBack   = RGB(255, 255, 255);
-        p.zone       = RGB(214, 214, 214);
-    }
-    return p;
-}
-
-/// Fills a rounded rectangle in one color.
-void FillRounded(HDC dc, const RECT& r, COLORREF color, int radius) {
-    HBRUSH brush = ::CreateSolidBrush(color);
-    HGDIOBJ oldBrush = ::SelectObject(dc, brush);
-    HGDIOBJ oldPen = ::SelectObject(dc, ::GetStockObject(NULL_PEN));
-    // RoundRect leaves the last row/column out, hence the +1.
-    ::RoundRect(dc, r.left, r.top, r.right + 1, r.bottom + 1, radius * 2, radius * 2);
-    ::SelectObject(dc, oldPen);
-    ::SelectObject(dc, oldBrush);
-    ::DeleteObject(brush);
-}
-
-/// Draws the outline of a rounded rectangle.
-void FrameRounded(HDC dc, const RECT& r, COLORREF color, int radius, int width = 1) {
-    HPEN pen = ::CreatePen(PS_SOLID, width, color);
-    HGDIOBJ oldPen = ::SelectObject(dc, pen);
-    HGDIOBJ oldBrush = ::SelectObject(dc, ::GetStockObject(NULL_BRUSH));
-    ::RoundRect(dc, r.left, r.top, r.right, r.bottom, radius * 2, radius * 2);
-    ::SelectObject(dc, oldBrush);
-    ::SelectObject(dc, oldPen);
-    ::DeleteObject(pen);
-}
+constexpr int kEdgeGap = 4;
 
 /**
  * \brief Maps a zone onto a miniature.
+ *
+ * The arithmetic itself lives in OverlayGeometry.h, where it is free of Windows
+ * types and covered by tests - and where the touch overlay reads it from as
+ * well, so the tile drawn here and the same zone drawn across a whole screen
+ * really are the same rectangle.
+ *
  * \param mini Miniature rectangle in client coordinates.
  * \param zone Zone in percent.
  * \param gap  Gap that keeps the tiles apart.
  * \return The tile rectangle.
  */
 RECT ZoneRect(const RECT& mini, const Zone& zone, int gap) {
-    const double w = mini.right - mini.left;
-    const double h = mini.bottom - mini.top;
-
-    RECT r;
-    r.left   = mini.left + static_cast<int>(w * zone.left / 100.0 + 0.5);
-    r.top    = mini.top + static_cast<int>(h * zone.top / 100.0 + 0.5);
-    r.right  = mini.left + static_cast<int>(w * (zone.left + zone.width) / 100.0 + 0.5);
-    r.bottom = mini.top + static_cast<int>(h * (zone.top + zone.height) / 100.0 + 0.5);
-
-    // Keep neighbouring tiles visually apart without letting them vanish.
-    if (r.right - r.left > 2 * gap) { r.left += gap; r.right -= gap; }
-    if (r.bottom - r.top > 2 * gap) { r.top += gap; r.bottom -= gap; }
-    return r;
+    // RECT holds LONG, RectI holds int - the same width on Win32, so the casts
+    // only make the crossing between the two visible.
+    const RectI area{static_cast<int>(mini.left), static_cast<int>(mini.top),
+                     static_cast<int>(mini.right), static_cast<int>(mini.bottom)};
+    const PercentRect part{zone.left, zone.top, zone.width, zone.height};
+    const RectI tile = ShrunkBy(PercentToPixels(area, part), gap);
+    return RECT{tile.left, tile.top, tile.right, tile.bottom};
 }
 
 }  // namespace
@@ -184,22 +102,6 @@ RECT FlyoutWindow::ScreenRect() const {
     RECT r{};
     if (hwnd_) ::GetWindowRect(hwnd_, &r);
     return r;
-}
-
-HFONT FlyoutWindow::CreateUiFont(UINT dpi, bool bold, bool small) const {
-    NONCLIENTMETRICSW ncm{};
-    ncm.cbSize = sizeof(ncm);
-    if (!::SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0)) {
-        return static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT));
-    }
-    LOGFONTW lf = ncm.lfMessageFont;
-    int height = std::abs(lf.lfHeight);
-    if (small) height = std::max(9, height - 2);
-    lf.lfHeight = -MulDiv(height, static_cast<int>(dpi), 96);
-    lf.lfWeight = bold ? FW_SEMIBOLD : lf.lfWeight;
-    lf.lfQuality = CLEARTYPE_QUALITY;
-    HFONT f = ::CreateFontIndirectW(&lf);
-    return f ? f : static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT));
 }
 
 void FlyoutWindow::Measure(UINT dpi, SIZE& size) {
@@ -309,39 +211,78 @@ void FlyoutWindow::Measure(UINT dpi, SIZE& size) {
     size.cy = y + pad;
 }
 
-void FlyoutWindow::Show(FlyoutContent content, const RECT& anchor, UINT dpi) {
+void FlyoutWindow::CreateFonts() {
+    for (HFONT* f : {&font_, &fontBold_, &fontSmall_}) {
+        if (*f) { ::DeleteObject(*f); *f = nullptr; }
+    }
+    font_ = CreateUiFont(dpi_, false, 0);
+    fontBold_ = CreateUiFont(dpi_, true, 0);
+    fontSmall_ = CreateUiFont(dpi_, false, -2);
+}
+
+void FlyoutWindow::Show(FlyoutContent content, const RECT& anchor, UINT dpi, double scale) {
     if (!hwnd_) return;
 
     content_ = std::move(content);
     if (content_.items.empty() && !content_.hasLayouts()) return;
 
-    dpi_ = dpi ? dpi : 96;
+    const UINT baseDpi = dpi ? dpi : 96;
+    dpi_ = ScaledDpi(baseDpi, scale);
     dark_ = SystemUsesDarkTheme();
     hotItem_ = -1;
     hotZone_ = -1;
 
-    for (HFONT* f : {&font_, &fontBold_, &fontSmall_}) {
-        if (*f) ::DeleteObject(*f);
-    }
-    font_ = CreateUiFont(dpi_, false, false);
-    fontBold_ = CreateUiFont(dpi_, true, false);
-    fontSmall_ = CreateUiFont(dpi_, false, true);
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    const bool haveMonitor =
+        ::GetMonitorInfoW(::MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST), &mi) != FALSE;
+
+    CreateFonts();
 
     SIZE size{};
     Measure(dpi_, size);
 
+    // A size factor is a wish, not an instruction: on the small screen it is
+    // meant for, it can ask for more room than the screen has. Rather than let
+    // the flyout hang off an edge, the factor is walked back until it fits -
+    // never below the plain DPI, so enlarging can only ever enlarge.
+    if (haveMonitor && dpi_ > baseDpi) {
+        const int roomX = (mi.rcWork.right - mi.rcWork.left) - 2 * kEdgeGap;
+        const int roomY = (mi.rcWork.bottom - mi.rcWork.top) - 2 * kEdgeGap;
+
+        if ((size.cx > roomX && size.cx > 0) || (size.cy > roomY && size.cy > 0)) {
+            const int byWidth =
+                size.cx > 0 ? ::MulDiv(static_cast<int>(dpi_), roomX, static_cast<int>(size.cx))
+                            : static_cast<int>(dpi_);
+            const int byHeight =
+                size.cy > 0 ? ::MulDiv(static_cast<int>(dpi_), roomY, static_cast<int>(size.cy))
+                            : static_cast<int>(dpi_);
+            const UINT fitted = static_cast<UINT>(
+                std::max<int>(static_cast<int>(baseDpi), std::min(byWidth, byHeight)));
+
+            if (fitted < dpi_) {
+                WRITE_DEBUG_LOG(
+                    log::dformat(L"Size factor reduced to fit: {} dpi instead of {}",
+                                 fitted, dpi_),
+                    log::dformat(L"wanted {}x{}, room {}x{}", size.cx, size.cy, roomX, roomY));
+                dpi_ = fitted;
+                CreateFonts();
+                Measure(dpi_, size);
+            }
+        }
+    }
+
     int x = (anchor.left + anchor.right) / 2 - size.cx / 2;
     int y = anchor.bottom + Scale(kAnchorGap, dpi_);
 
-    MONITORINFO mi{};
-    mi.cbSize = sizeof(mi);
-    if (::GetMonitorInfoW(::MonitorFromRect(&anchor, MONITOR_DEFAULTTONEAREST), &mi)) {
-        x = std::clamp<int>(x, mi.rcWork.left + 4, std::max<int>(mi.rcWork.left + 4,
-                                                                 mi.rcWork.right - size.cx - 4));
+    if (haveMonitor) {
+        x = std::clamp<int>(x, mi.rcWork.left + kEdgeGap,
+                            std::max<int>(mi.rcWork.left + kEdgeGap,
+                                          mi.rcWork.right - size.cx - kEdgeGap));
         if (y + size.cy > mi.rcWork.bottom) {
             y = anchor.top - Scale(kAnchorGap, dpi_) - size.cy;  // flip above
         }
-        y = std::max<int>(y, mi.rcWork.top + 4);
+        y = std::max<int>(y, mi.rcWork.top + kEdgeGap);
     }
 
     HRGN rgn = ::CreateRoundRectRgn(0, 0, size.cx + 1, size.cy + 1,

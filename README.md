@@ -57,6 +57,7 @@ The format is JSONC – comments and trailing commas are allowed:
   "showBuiltinItems": true,  // show minimize, notification area, ... below the layouts
   "useWorkArea": true,       // compute percentages without the taskbar
   "showAllMonitors": true,   // offer every screen, not just the current one
+  "uiScale": 1.0,            // size factor of the flyout, on top of the DPI scaling
   "buttonDetection": "auto", // ask the window, compute when it stays silent
 
   "layouts": [
@@ -95,6 +96,30 @@ Zones are meant to tile the screen without overlapping, the way the Windows snap
 but nothing enforces that. If zones do overlap, the smallest one under the cursor wins, so a
 small tile drawn on top of a large one stays reachable.
 
+### Making the flyout bigger
+
+Windows sizes the flyout for the resolution of the screen, which on a small panel means
+small — correct in millimetres, and awkward to hit. `"uiScale"` multiplies that:
+
+```jsonc
+  "uiScale": 1.4,
+```
+
+The factor is folded into the DPI the flyout is laid out for, and every metric of it
+already goes through that DPI. So fonts, paddings, corner radii and the miniatures grow
+together and nothing can be pulled out of proportion — it is the same multiplication a
+higher-resolution screen would apply. Accepted range is 0.75 to 3; values below 1 shrink
+it.
+
+A factor is a wish, not an instruction. On the very screen it is meant for it may ask
+for more room than there is, so after measuring, the flyout compares itself with the
+work area and walks the factor back until it fits — but never below 1.0, so asking for a
+larger flyout can never hand you a smaller one. In a build with logging compiled in, a
+reduction says so in the log.
+
+The touch overlay has no such setting: its trigger field and zones are given in percent
+of the screen, so they are already as large as the screen is.
+
 If the `layouts` section is missing entirely, five built-in layouts are used (halves, thirds,
 large + two, quarters, full screen). An explicitly empty list `[]` hides the miniature area
 and leaves only the text items.
@@ -123,6 +148,88 @@ else in the file.
 Values are rounded to two decimals with trailing zeros dropped, and clamped to the ranges the
 parser accepts (`left`/`top` 0–99, `width`/`height` 1–100) — a window hanging over the edge of
 its screen would otherwise produce a line the next load silently corrects.
+
+### Dragging a window into a zone by finger
+
+A finger has no hover, and the minimize button is around 11 pixels wide at 100 % —
+the flyout is out of reach on a tablet. So touch gets a second route that starts from
+something a finger is good at: picking a window up and carrying it.
+
+Drag a window by its title bar. A field appears in the middle of the screen. Rest the
+finger in it for a moment and the zones unfold across the whole monitor; let go over
+one of them and the window lands there. Let go anywhere else and nothing happens —
+the drag stays an ordinary drag.
+
+```
+  [None] ──window picked up by its caption──▶ [Watching] ──finger rests──▶ [Zones]
+     ▲          (touch, resizable)                 │                          │
+     └─────────────────────────────────────────────┴──────────────────────────┘
+         let go, ESC, or the move loop ended — a zone under the finger is applied
+```
+
+Nothing about it sits in the input path, and nothing is loaded into the dragged
+application:
+
+* **Windows announces the drag.** `EVENT_SYSTEM_MOVESIZESTART` and `...MOVESIZEEND`
+  bracket the modal loop `DefWindowProc` runs while a window is being moved. The
+  WinEvent hook is registered `WINEVENT_OUTOFCONTEXT`, so the callback arrives on our
+  own message loop — the same promise the button detection makes.
+* **The overlay never takes input.** `WS_EX_TRANSPARENT` plus `WS_EX_NOACTIVATE`: every
+  touch point passes straight through to the window being dragged. Where the finger is
+  comes from the mouse hook that already exists, in screen coordinates. Nothing the
+  overlay does can interrupt the drag it is drawn for.
+* **It is composited.** `WS_EX_LAYERED` hands the surface to DWM, so the window
+  travelling underneath does not make it flicker. Transparency is a color key plus one
+  constant alpha rather than per-pixel alpha, which keeps ordinary `WM_PAINT` drawing
+  working — GDI text writes no alpha channel, so per-pixel alpha would mean composing
+  every label by hand.
+* **Move is told from resize** by where the press landed. `MOVESIZESTART` brackets both,
+  so the hit test happens at the moment of the press, before the window disappears into
+  its loop and stops answering. That test costs one message, and only for a press that
+  could start a touch drag at all.
+* **The drop waits for the loop to end.** A window still finishing its move loop would
+  overwrite anything positioned during it. `MOVESIZEEND` is the signal; if an app never
+  sends one, a 250 ms grace after the finger lifts applies the zone anyway.
+
+Configuration lives in a `"touch"` block:
+
+```jsonc
+  "touch": {
+    "enabled": true,
+    "alsoMouse": false,     // also react to a window dragged with the mouse
+    "dwellMs": 250,         // rest in the field before the zones unfold
+    "trigger": { "left": 40, "top": 40, "width": 20, "height": 20 },
+    "layouts": [
+      {
+        "name": "Touch",
+        "zones": [
+          { "left":  0, "top":  0, "width": 50, "height": 100 },
+          { "left": 50, "top":  0, "width": 50, "height":  50 },
+          { "left": 50, "top": 50, "width": 50, "height":  50 },
+        ],
+      },
+    ],
+  },
+```
+
+| Field | Meaning |
+|---|---|
+| `enabled` | whether the drag route is offered at all |
+| `alsoMouse` | react to a mouse drag too — off by default, on for trying it out on a desktop |
+| `dwellMs` | how long the finger must rest in the field; too short and merely carrying a window across the middle of the screen unfolds the zones |
+| `trigger` | where the field sits, in percent of the same reference area the zones use |
+| `layouts` | the zone sets offered while dragging; same shape as `layouts` above |
+
+Touch has its own layouts because it is a different task. Picking one of five miniatures
+with a mouse is a menu; doing it with a window already in mid-drag is not. So there is
+exactly **one** drop target: the first layout in `touch.layouts` whose `monitors`
+selector matches the screen the finger is on. That is also how a tablet gets one
+arrangement upright and another on its side — `"monitors": ["1920x1200"]` against
+`"monitors": ["1200x1920"]`. Leave `layouts` out entirely and the flyout's layouts are
+used instead, so an existing configuration gains the drag route without being touched.
+
+`alsoMouse` is the way to try all of this without a touchscreen: drag any window by its
+title bar with the mouse and the same field appears.
 
 ### How the button is located
 
@@ -183,6 +290,13 @@ This works in a plain release build. The `WRITE_*_LOG` macros do not: they are c
 with `_DEBUG` or `_RELEASE_WITH_DEBUG_LOG`, so `minflyout.log` stays empty in a release build no
 matter what `logToFile` says. The diagnosis reports which of the two cases you are in on its
 second line.
+
+The report prints **two DPI values**, and the difference explains a whole class of
+failures. `GetDpiForWindow` answers with the DPI a window *thinks* in — its awareness
+context — which for an app that is not per-monitor aware is 96 however large DWM actually
+draws it. MinFlyout is PerMonitorV2 and reads physical coordinates, so everything it
+measures against the glass uses the screen's DPI. Where the two lines differ, the window
+is one of those apps.
 
 The report answers, in order: is the window on the ignore list, do its styles allow a minimize
 button at all, is the cursor inside the caption button region, what does `WM_NCHITTEST` return,
@@ -284,7 +398,11 @@ it off — worth knowing if `%APPDATA%` is redirected to a share that reports no
 | `src/CaptionProbe.*` | the detection ladder: hit test, DWM block, title bar strip, estimate |
 | `src/CaptionGeometry.*` | where the caption buttons have to be; free of Windows dependencies |
 | `src/Diagnostics.*` | Ctrl+Alt+F12: the whole decision chain for one window, in plain text |
+| `src/DragWatcher.*` | WinEvent hook on the move/size loop of foreign windows, only posts |
 | `src/FlyoutWindow.*` | GDI popup: monitor miniatures, zone tiles, text items |
+| `src/ZoneOverlay.*` | the touch drop target: trigger field, then zones, input-transparent |
+| `src/OverlayGeometry.*` | percent to pixels, tile gaps, which zone a point hits; free of Windows dependencies |
+| `src/Painting.*` | palette and the rounded-rectangle primitives, shared by flyout and overlay |
 | `src/ItemRegistry.*` | provider registry, merging of the items |
 | `src/BuiltinProviders.cpp` | the two providers: core actions and window groups |
 | `src/Config.*` | loading/creating `config.jsonc`, schema, default values |
@@ -298,6 +416,7 @@ it off — worth knowing if `%APPDATA%` is redirected to a share that reports no
 | `tests/JsonTest.cpp` | 40 checks for the parser, without a test framework |
 | `tests/SelectorTest.cpp` | 33 checks for the monitor selectors |
 | `tests/GeometryTest.cpp` | 57 checks for the caption button arithmetic |
+| `tests/OverlayGeometryTest.cpp` | 31 checks for the overlay arithmetic |
 | `docs/` | Doxygen main page, module groups, helper project `docs.vcxproj` |
 | `res/` | application icon (`minflyout.ico`, `icon.svg`), resource file, manifest |
 | `tools/build_icon.py` | generates the `.ico` from code – change motif or color here |
@@ -408,7 +527,11 @@ cmake --build build
 ## Documentation
 
 `doxygen` in the project directory generates `build/doxygen-html/index.html` (or build the
-`docs` project in Visual Studio). The configuration is set up for **zero warnings**:
+`docs` project in Visual Studio). Besides the API it carries two hand-written pages:
+`docs/mainpage.dox` explains the mechanisms, and `docs/configuration.dox` is the complete
+configuration reference — every key with its default and its range, plus example files
+for a small laptop, two screens of different shape, a tablet that turns, and a session
+spent chasing an app that stays undetected. The configuration is set up for **zero warnings**:
 `EXTRACT_ALL` stays off, `WARN_IF_UNDOCUMENTED` and `WARN_NO_PARAMDOC` are on, so missing
 comments stand out. Warnings end up in `build/doxygen-warnings.log`.
 
@@ -418,6 +541,9 @@ and dependency graphs.
 ## Usage
 
 * Hold the mouse over the minimize button → the flyout unfolds below it.
+* With a finger: drag a window by its title bar, rest it in the field that appears,
+  and drop it on a zone. See [Dragging a window into a zone by
+  finger](#dragging-a-window-into-a-zone-by-finger).
 * The upper part shows one row per monitor: a miniature per layout, in the aspect ratio of
   that screen. Clicking a tile puts the window on **that monitor, into that zone** — one click
   for screen and position together.
@@ -450,6 +576,23 @@ With `showBuiltinItems: false` only the size list remains.
   is used, and every failed detection lands in the log with the window class and the `HT` code
   the window returned.
 * **Non-resizable windows** (without `WS_THICKFRAME`) show the size items greyed out.
+* **Windows that are not per-monitor DPI aware rest on the estimate alone.** An older
+  program — an MFC application, say — reports 96 dpi however large DWM draws it, answers
+  `WM_NCHITTEST` over its caption buttons with `HTCAPTION` rather than `HTMINBUTTON`, and
+  `DWMWA_CAPTION_BUTTON_BOUNDS` comes back in a coordinate space that mixes the window's
+  own scale with the screen's — a well-formed rectangle placed in the middle of the
+  caption. Both of the exact sources therefore drop out, and only the last resort of the
+  ladder is left: the visible frame plus the screen's title bar height. It works, but it
+  is a computation, so a window of this kind is the one most likely to need
+  `"buttonDetection"` tuning or a Ctrl+Alt+F12 report.
+* **The touch overlay stays on one screen.** The trigger field follows the finger from
+  monitor to monitor, but once the zones are unfolded they belong to the screen they
+  opened on — crossing to another one during that phase does not move them. Dropping a
+  window on a different screen is what the flyout is for.
+* **Touch is told from mouse by a marker**, not by a separate input path: Windows
+  promotes contacts to mouse messages and stamps `MSLLHOOKSTRUCT::dwExtraInfo`. Where
+  that marker does not arrive, `"alsoMouse": true` makes the drag route work for every
+  drag regardless of what caused it.
 * Hidden foreign windows (`TrayStash`) are restored on `WM_QUERYENDSESSION`, on exit and when
   the process disappears – a crash of MinFlyout, on the other hand, would leave them behind
   invisible.

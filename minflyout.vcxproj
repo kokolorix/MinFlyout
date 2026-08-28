@@ -61,6 +61,7 @@
     <ClCompile Include="src\Config.cpp" />
     <ClCompile Include="src\ConfigWatcher.cpp" />
     <ClCompile Include="src\Diagnostics.cpp" />
+    <ClCompile Include="src\DragWatcher.cpp" />
     <ClCompile Include="src\FlyoutWindow.cpp" />
     <ClCompile Include="src\HookThread.cpp" />
     <ClCompile Include="src\ItemRegistry.cpp" />
@@ -68,8 +69,11 @@
     <ClCompile Include="src\Log.cpp" />
     <ClCompile Include="src\Monitors.cpp" />
     <ClCompile Include="src\MonitorSelector.cpp" />
+    <ClCompile Include="src\OverlayGeometry.cpp" />
+    <ClCompile Include="src\Painting.cpp" />
     <ClCompile Include="src\TrayStash.cpp" />
     <ClCompile Include="src\WindowSizer.cpp" />
+    <ClCompile Include="src\ZoneOverlay.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\AppController.h" />
@@ -79,6 +83,7 @@
     <ClInclude Include="src\Config.h" />
     <ClInclude Include="src\ConfigWatcher.h" />
     <ClInclude Include="src\Diagnostics.h" />
+    <ClInclude Include="src\DragWatcher.h" />
     <ClInclude Include="src\FlyoutWindow.h" />
     <ClInclude Include="src\HookThread.h" />
     <ClInclude Include="src\ItemRegistry.h" />
@@ -86,8 +91,11 @@
     <ClInclude Include="src\Log.h" />
     <ClInclude Include="src\Monitors.h" />
     <ClInclude Include="src\MonitorSelector.h" />
+    <ClInclude Include="src\OverlayGeometry.h" />
+    <ClInclude Include="src\Painting.h" />
     <ClInclude Include="src\TrayStash.h" />
     <ClInclude Include="src\WindowSizer.h" />
+    <ClInclude Include="src\ZoneOverlay.h" />
     <ClInclude Include="res\resource.h" />
   </ItemGroup>
   <ItemGroup>

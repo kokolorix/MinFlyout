@@ -43,6 +43,9 @@ enum : UINT {
     WM_MFLY_TRAY      = WM_APP + 6,  ///< Notification from a tray icon.
     WM_MFLY_ZONE      = WM_APP + 7,  ///< Flyout reports the chosen zone (\c wParam = hotspot index).
     WM_MFLY_CONFIG    = WM_APP + 8,  ///< Configuration file was saved (posted by the ConfigWatcher).
+    WM_MFLY_MOUSEUP   = WM_APP + 9,  ///< Mouse button released (posted by the HookThread).
+    WM_MFLY_DRAGSTART = WM_APP + 10, ///< A foreign window entered its move/size loop (\c lParam = HWND).
+    WM_MFLY_DRAGEND   = WM_APP + 11, ///< That loop ended (\c lParam = HWND).
 };
 
 /** \name Default values for timings (milliseconds)
@@ -50,6 +53,44 @@ enum : UINT {
  *  @{ */
 constexpr UINT kHoverDelayMs   = 350;  ///< Hover delay on the button before the flyout opens.
 constexpr UINT kCloseGraceMs   = 260;  ///< Grace period before the flyout closes again.
+constexpr UINT kTouchDwellMs   = 250;  ///< Rest in the touch trigger field before the zones unfold.
+/** @} */
+
+/** \name Touch and pen input
+ *
+ *  Windows promotes pen and touch contacts to ordinary mouse messages and marks
+ *  them in the extra information of the message - \c MSLLHOOKSTRUCT::dwExtraInfo
+ *  in a low-level hook, \c GetMessageExtraInfo in a window procedure. The
+ *  signature and the mask are the ones documented under "Distinguishing Pen
+ *  Input from Mouse and Touch"; bit 7 of the low byte separates touch from pen.
+ *
+ *  \note The signature is the only way to tell a finger from a mouse in the
+ *        hook, and it is worth verifying on the target machine rather than
+ *        trusting. \c "traceDetection" in a debug build logs what a press
+ *        carried; \c "alsoMouse" makes the touch route work regardless, which
+ *        is the fallback if the marker ever turns out not to arrive.
+ *  @{ */
+constexpr ULONG_PTR kPenTouchSignature = 0xFF515700;  ///< Marker Windows stamps on promoted input.
+constexpr ULONG_PTR kPenTouchMask      = 0xFFFFFF00;  ///< Mask for \ref kPenTouchSignature.
+constexpr ULONG_PTR kTouchBit          = 0x80;        ///< Set for touch, clear for the pen.
+
+/**
+ * \brief Reports whether a mouse event was promoted from pen or touch.
+ * \param extraInfo \c MSLLHOOKSTRUCT::dwExtraInfo of the event.
+ * \return \c true for a contact, \c false for a real mouse.
+ */
+inline bool FromPenOrTouch(ULONG_PTR extraInfo) {
+    return (extraInfo & kPenTouchMask) == kPenTouchSignature;
+}
+
+/**
+ * \brief Reports whether a mouse event came from a finger rather than the pen.
+ * \param extraInfo \c MSLLHOOKSTRUCT::dwExtraInfo of the event.
+ * \return \c true only for touch.
+ */
+inline bool FromTouch(ULONG_PTR extraInfo) {
+    return FromPenOrTouch(extraInfo) && (extraInfo & kTouchBit) != 0;
+}
 /** @} */
 
 /** \name Fixed timing constants (milliseconds)
@@ -135,11 +176,39 @@ inline int Scale(int v, UINT dpi) {
     return MulDiv(v, static_cast<int>(dpi), 96);
 }
 
+/** \name Size factor of the flyout
+ *  @{ */
+constexpr double kMinUiScale = 0.75;  ///< Smallest accepted Config::uiScale.
+constexpr double kMaxUiScale = 3.00;  ///< Largest accepted Config::uiScale.
+/** @} */
+
+/**
+ * \brief Folds the user's size factor into a DPI value.
+ *
+ * Every metric of the flyout already goes through \ref Scale, so enlarging it
+ * is a matter of enlarging the DPI it is laid out for - fonts, paddings, corner
+ * radii and the miniatures all follow, and no metric constant has to know about
+ * the factor. That is also why the factor cannot pull anything out of
+ * proportion: it is the same multiplication a higher-resolution screen applies.
+ *
+ * \param dpi    The real DPI of the target monitor.
+ * \param factor Config::uiScale; clamped to \ref kMinUiScale ... \ref kMaxUiScale,
+ *               and a value that is not a number leaves the DPI alone.
+ * \return The DPI to lay out for; never 0, so \ref Scale cannot collapse.
+ */
+UINT ScaledDpi(UINT dpi, double factor);
+
 /**
  * \brief Determines the DPI of a window.
  *
  * Uses \c GetDpiForWindow, falls back to \c GetDpiForMonitor and finally to the
  * screen DC, so that the application also starts on older systems.
+ *
+ * \warning This is the DPI the window *thinks* in - its DPI awareness context.
+ *          For our own windows that is the screen's DPI; for a foreign one it
+ *          need not be, and for an application that is not per-monitor aware it
+ *          is 96 however large DWM draws it. Anything measured against physical
+ *          pixels wants \ref DpiForWindowMonitor instead.
  *
  * \param hwnd Window (may be \c nullptr).
  * \return DPI value, at least 96.
@@ -152,6 +221,27 @@ UINT DpiForWindowCompat(HWND hwnd);
  * \return DPI value, at least 96.
  */
 UINT DpiForPoint(POINT pt);
+
+/**
+ * \brief Determines the DPI of the screen a window is drawn on.
+ *
+ * Not the same thing as \ref DpiForWindowCompat, and the difference matters for
+ * every foreign window: \c GetDpiForWindow answers with the DPI that window
+ * *thinks* in, which is its DPI awareness context, not its screen. An
+ * application that is not per-monitor aware - an older MFC program, say - is
+ * told 96 on a 175 % display and drawn by DWM at 175 % anyway. Asking it
+ * therefore yields a number that describes nobody's pixels.
+ *
+ * MinFlyout is \c PerMonitorV2 and reads physical coordinates, so wherever it
+ * reasons about what is actually on the glass - how tall that title bar is, how
+ * wide those caption buttons are, how large to draw its own flyout beside them -
+ * the screen's DPI is the right one. \ref DpiForWindowCompat stays correct for
+ * our own windows.
+ *
+ * \param window Window to locate (may be \c nullptr - then the primary screen).
+ * \return DPI value, at least 96.
+ */
+UINT DpiForWindowMonitor(HWND window);
 
 /** \name DWM window attributes
  *  The IDs from \c dwmapi.h; the function itself is resolved at run time.

@@ -11,8 +11,10 @@
 #include "CaptionProbe.h"
 #include "Common.h"
 #include "ConfigWatcher.h"
+#include "DragWatcher.h"
 #include "FlyoutWindow.h"
 #include "HookThread.h"
+#include "ZoneOverlay.h"
 
 namespace mfly {
 
@@ -35,6 +37,23 @@ namespace mfly {
  * The actual work happens on the UI thread: the hit tests performed by
  * \ref ProbeMinimizeButton must not run on the hook thread (see
  * \ref HookThread).
+ *
+ * Touch runs a second, independent state machine beside it, because a finger
+ * has no hover and the minimize button is far too small for one. There the
+ * window itself is the pointer:
+ *
+ * ```
+ *              window picked up by its caption      finger rests in the field
+ *   [None] ──────────────────────────────────▶ [Watching] ──────────────────▶ [Zones]
+ *      ▲       (touch, resizable, not paused)        │                            │
+ *      │                                             │                            │
+ *      └─────────────────────────────────────────────┴────────────────────────────┘
+ *          window let go, ESC, or the move loop ended - a zone under the finger
+ *          at that moment is applied
+ * ```
+ *
+ * The two never run at once: a drag closes the flyout and suppresses the
+ * detection until it is over.
  */
 class AppController {
 public:
@@ -73,11 +92,20 @@ private:
         Open,   ///< Flyout is visible.
     };
 
+    /// States of the touch drag.
+    enum class DragState {
+        None,      ///< No window is being dragged by finger.
+        Watching,  ///< Dragging; the trigger field is on screen.
+        Zones,     ///< The zones are unfolded and one of them can be dropped on.
+    };
+
     /// IDs of the timers in use.
     enum : UINT_PTR {
         kTimerHover = 1,  ///< Hover delay \ref kHoverDelayMs.
         kTimerGrace = 2,  ///< Grace period \ref kCloseGraceMs before closing.
         kTimerPoll  = 3,  ///< Periodic cleanup check.
+        kTimerDwell = 4,  ///< Rest in the touch trigger field before the zones unfold.
+        kTimerDrop  = 5,  ///< Grace after the finger lifted, waiting for the move loop to end.
     };
 
     /**
@@ -110,6 +138,61 @@ private:
 
     /// Handles a mouse click: a click outside the flyout cancels it.
     void HandleMouseDown();
+
+    /**
+     * \brief Notes how and where the last button press arrived.
+     *
+     * Run from \ref HandleMouseDown, before anything else: at that moment the
+     * pressed window has not entered its move loop yet, so \c WM_NCHITTEST
+     * still answers and says whether the press landed on a caption. When
+     * \ref WM_MFLY_DRAGSTART follows a moment later it is too late to ask -
+     * and \c EVENT_SYSTEM_MOVESIZESTART alone cannot tell a move from a resize.
+     *
+     * Costs one message per press, and only for a press that could start a
+     * touch drag at all: with the feature off, or a mouse press without
+     * TouchConfig::alsoMouse, nothing is sent.
+     */
+    void RememberPress();
+
+    /**
+     * \brief A foreign window entered its move/size loop.
+     *
+     * Decides whether this is a drag worth offering zones for, and puts the
+     * trigger field on the screen the pointer is on.
+     *
+     * \param window The window being dragged.
+     */
+    void OnDragStart(HWND window);
+
+    /**
+     * \brief Follows the finger while a drag is running.
+     * \param pt Pointer position in screen coordinates.
+     */
+    void OnDragMove(POINT pt);
+
+    /**
+     * \brief Shows the trigger field on the monitor under a point.
+     *
+     * Also called again when the finger crosses to another screen, which is how
+     * the overlay picks up that monitor's DPI and its own layout.
+     *
+     * \param pt Pointer position in screen coordinates.
+     * \return \c true if a field is on screen afterwards.
+     */
+    bool ShowTriggerFor(POINT pt);
+
+    /**
+     * \brief Ends the touch drag and cleans up.
+     * \param applyZone \c true applies the zone under the finger, if there is
+     *        one; \c false withdraws the overlay and leaves the window alone.
+     */
+    void EndDrag(bool applyZone);
+
+    /// Stops the dwell timer if it is running.
+    void StopDwell();
+
+    /// Stops the drop grace timer if it is running.
+    void StopDropGrace();
 
     /// Builds the context, collects the items and shows the flyout.
     /**
@@ -253,6 +336,16 @@ private:
     HookThread    hooks_;   ///< Low-level hooks on their own thread.
     FlyoutWindow  flyout_;  ///< The popup.
     ConfigWatcher watcher_; ///< Watches the configuration file, if enabled.
+    DragWatcher   dragger_; ///< Reports the move/size loop of foreign windows.
+    ZoneOverlay   overlay_; ///< The touch drop target.
+
+    DragState dragState_ = DragState::None;  ///< State of the touch drag.
+    HWND      dragWindow_ = nullptr;         ///< Window currently being dragged.
+    HMONITOR  dragMonitor_ = nullptr;        ///< Monitor the overlay is on.
+    bool      dwellRunning_ = false;         ///< \ref kTimerDwell is running.
+    bool      dropGraceRunning_ = false;     ///< \ref kTimerDrop is running.
+    bool      pressWasContact_ = false;      ///< Last press came from pen or touch.
+    bool      pressOnCaption_ = false;       ///< Last press landed on a caption.
 
     State state_ = State::Idle;       ///< Current state.
     bool  paused_ = false;            ///< Detection paused.

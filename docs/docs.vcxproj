@@ -65,6 +65,7 @@ doxygen Doxyfile</Command>
     <None Include="..\build\doxygen-html\navtreedata.js" />
     <None Include="mainpage.dox" />
     <None Include="groups.dox" />
+    <None Include="configuration.dox" />
     <None Include="..\Doxyfile" />
   </ItemGroup>
 

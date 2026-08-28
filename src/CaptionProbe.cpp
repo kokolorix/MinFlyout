@@ -6,6 +6,7 @@
 #include "CaptionProbe.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 #include "Log.h"
 
@@ -129,6 +130,26 @@ bool CaptionBlockFromDwm(HWND window, RECT& out) {
     if (screen.top < windowRect.top) return false;
     if (screen.bottom > windowRect.top + (windowRect.bottom - windowRect.top) / 2) return false;
 
+    // And it has to be where a caption button block can be at all: flush against
+    // one of the upper corners of the visible frame - the right one, or the left
+    // one with RTL layout. This is the same assumption EstimateCaptionBlock
+    // rests on, applied to an answer instead of to a guess.
+    //
+    // Worth checking, because the answer is not always in the coordinate space
+    // this function assumes. An application that is not per-monitor DPI aware
+    // gets its window scaled by DWM, and the offsets reported for it then place
+    // the block somewhere in the middle of the caption - a rectangle that looks
+    // perfectly well-formed, sits inside the window, and is nowhere near a
+    // button. Before this test it won the ladder and the two honest sources
+    // below never got asked.
+    RECT frame{};
+    if (!VisibleFrame(window, frame)) return false;
+
+    const int slack = CaptionButtonWidth(TitleBarHeight(DpiForWindowMonitor(window)));
+    const bool flushRight = std::abs(frame.right - screen.right) <= slack;
+    const bool flushLeft = std::abs(screen.left - frame.left) <= slack;
+    if (!flushRight && !flushLeft) return false;
+
     out = screen;
     return true;
 }
@@ -155,7 +176,7 @@ bool ComputeMinimizeButton(HWND window, const CaptionLayout& layout,
     // reports 23 pixels where the drawn bar is 56 - and believing it would put
     // the buttons in the wrong place. Anything clearly below the system title
     // bar height is therefore not trusted.
-    const int expected = TitleBarHeight(DpiForWindowCompat(window));
+    const int expected = TitleBarHeight(DpiForWindowMonitor(window));
     RECT strip{};
     if (TitleBarStrip(window, strip) && (strip.bottom - strip.top) * 4 >= expected * 3) {
         const RectI bar = ToRectI(strip);
@@ -208,6 +229,7 @@ bool IsIgnoredWindow(HWND topLevel) {
     static const wchar_t* kIgnored[] = {
         L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd", L"Progman", L"WorkerW",
         L"Windows.UI.Core.CoreWindow", L"MinFlyout.Flyout", L"MinFlyout.Controller",
+        L"MinFlyout.Overlay",
     };
     for (const wchar_t* name : kIgnored) {
         if (::lstrcmpiW(cls, name) == 0) return true;
@@ -258,7 +280,10 @@ bool MayBeCaptionButton(HWND topLevel, POINT pt) {
     RECT frame{};
     if (!VisibleFrame(topLevel, frame)) return false;
 
-    const int titleBar = TitleBarHeight(DpiForWindowCompat(topLevel));
+    // The screen's DPI, not the window's: the region is measured against
+    // physical pixels, and a window that is not per-monitor aware reports 96
+    // however large DWM actually draws it (\ref DpiForWindowMonitor).
+    const int titleBar = TitleBarHeight(DpiForWindowMonitor(topLevel));
     const RectI region = CaptionButtonRegion(ToRectI(frame), titleBar, layout);
     return region.contains(pt.x, pt.y);
 }
@@ -314,7 +339,7 @@ bool ProbeMinimizeButton(POINT pt, ProbeMode mode, HitInfo& out) {
     // a few pixels taller than the system does. Sideways there is no slack -
     // that space belongs to the maximize button.
     RECT generous = button;
-    generous.bottom += TitleBarHeight(DpiForWindowCompat(root)) / 3;
+    generous.bottom += TitleBarHeight(DpiForWindowMonitor(root)) / 3;
     if (!PtInRectPt(generous, pt)) return false;
 
     out.window = root;

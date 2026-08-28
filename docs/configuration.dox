@@ -1,0 +1,346 @@
+/**
+ * \page page_config Configuration reference
+ *
+ * Every key MinFlyout understands, what it does, what it defaults to and what
+ * happens at the edges of its range. \ref config_examples follows with complete
+ * files for a small laptop, two screens of different shape, a tablet that turns,
+ * and a session spent chasing an app that stays undetected.
+ *
+ * The mechanisms behind the settings are described on the main page:
+ * \ref main_capture writes a zone down without counting pixels,
+ * \ref main_monitor_layouts explains the monitor selectors,
+ * \ref main_detection what \c "buttonDetection" chooses between, and
+ * \ref main_diagnosis what to do when a window stays undetected.
+ *
+ * \section config_file The file
+ *
+ * On first start \c \%APPDATA%\\MinFlyout\\config.jsonc is created with a
+ * commented template - the same text \ref mfly::ConfigStore::Reload writes, so
+ * the template and the defaults documented here cannot drift apart.
+ *
+ * The format is JSONC, read by the parser in \ref Json.h: line comments
+ * (<code>//</code>), block comments and trailing commas are allowed.
+ *
+ * \c res/config.schema.json describes the whole file, so an editor can complete
+ * the keys, show these descriptions on hover and flag a typo such as
+ * \c showAllMonitor. In VS Code, either add an entry to \c json.schemas in the
+ * **user** settings - appending to the array rather than replacing it - with
+ * <code>fileMatch</code> set to <code>&#42;&#42;&#47;MinFlyout/config.jsonc</code>
+ * and <code>url</code> to the full path of \c res/config.schema.json; or put
+ * <code>"$schema": "d:/Projects/MinFlyout/res/config.schema.json"</code> as the
+ * first key of the file itself. MinFlyout ignores keys it does not know, so the
+ * file keeps working either way. Forward slashes are accepted in that path and
+ * save the escaping.
+ *
+ * The trailing commas of the template stay flagged with a warning: the JSONC
+ * mode accepts them, but VS Code marks them anyway and offers no setting for
+ * that single diagnostic - the only switch is \c "json.validate.enable": \c false,
+ * which would also disable the schema.
+ *
+ * **Saving applies the changes.** \ref mfly::ConfigWatcher watches the folder,
+ * debounces for 300 ms and posts one message per save; a balloon on the tray
+ * icon confirms the reload. The tray menu entry *Reload configuration* does the
+ * same by hand, and \c "watchConfig": \c false turns the watching off.
+ *
+ * \section config_top Top-level keys
+ *
+ * | Key | Type | Default | Meaning |
+ * |---|---|---|---|
+ * | \c hoverDelayMs | integer, 0 - 5000 | \c 350 | How long the pointer must rest on the minimize button before the flyout opens. \c 0 opens on the first movement over it, which makes crossing the title bar noisy. (\ref mfly::Config::hoverDelayMs) |
+ * | \c closeGraceMs | integer, 0 - 5000 | \c 260 | How long the flyout stays after the pointer has left it and the button. It survives the trip between the two regardless - a corridor spanning both is treated as inside. (\ref mfly::Config::closeGraceMs) |
+ * | \c showBuiltinItems | boolean | \c true | Show the text items below the miniatures. \c false leaves the layouts alone. (\ref mfly::Config::showBuiltinItems) |
+ * | \c useWorkArea | boolean | \c true | \c true bases every percentage on the work area, so a zone of 100 % height stops above the taskbar. \c false uses the full monitor area. Applies to the flyout, to the touch overlay and to what Ctrl+Alt+F11 measures, so the three always mean the same thing. (\ref mfly::Config::useWorkArea) |
+ * | \c showAllMonitors | boolean | \c true | \c true draws one row per screen, so one click can move a window to another monitor. \c false shows only the screen the window is on. (\ref mfly::Config::showAllMonitors) |
+ * | \c uiScale | number, 0.75 - 3 | \c 1.0 | Size factor of the flyout, on top of the DPI scaling; the details are in \ref config_uiscale below. (\ref mfly::Config::uiScale) |
+ * | \c buttonDetection | \c "auto", \c "hittest", \c "computed" | \c "auto" | How the minimize button is located; \ref main_detection walks the three. An unknown value is a configuration error and leaves the default in place. (\ref mfly::Config::buttonDetection) |
+ * | \c traceDetection | boolean | \c false | One log line per gate of the detection, so a mouse movement that never reaches the probe can be followed to where it died. One line per change, not per movement, and only in a build with the logging macros compiled in. (\ref mfly::Config::traceDetection) |
+ * | \c logToFile | boolean | \c false | Also write the log to \c \%APPDATA%\\MinFlyout\\minflyout.log, UTF-8 with BOM, rotated to \c .log.1 at 1 MB. The debugger output is always written; this only adds the file, and only where logging is compiled in. (\ref mfly::Config::logToFile) |
+ * | \c watchConfig | boolean | \c true | Reload as soon as the file is saved. Worth turning off if \c \%APPDATA% is redirected to a share that reports no changes. (\ref mfly::Config::watchConfig) |
+ * | \c layouts | array of \ref config_layout | five built-in | The layouts the flyout offers. A missing key falls back to \ref mfly::DefaultLayouts; an explicitly empty list \c [] hides the miniature area and leaves only the text items. (\ref mfly::Config::layouts) |
+ * | \c touch | object | see \ref config_touch | Dragging a window into a zone with the finger. (\ref mfly::Config::touch) |
+ *
+ * Numbers outside their range are clamped rather than rejected: a
+ * \c hoverDelayMs of 100000 becomes 5000 and the file still loads. The only
+ * values that make the load fail are structural - a \c "layouts" that is not an
+ * array, a \c "buttonDetection" nobody knows, a malformed \c "touch".
+ * \ref config_errors says what happens then.
+ *
+ * \section config_uiscale Making the flyout bigger
+ *
+ * Windows sizes the flyout for the resolution of the screen, which on a small
+ * panel means small - correct in millimetres, and awkward to hit.
+ * \c "uiScale" multiplies that.
+ *
+ * \code{.js}
+ *   "uiScale": 1.4,
+ * \endcode
+ *
+ * The factor is folded into the DPI the flyout is laid out for
+ * (\ref mfly::ScaledDpi), and every metric already goes through that DPI. Fonts,
+ * paddings, corner radii and the miniatures therefore grow together and nothing
+ * can be pulled out of proportion - it is the same multiplication a
+ * higher-resolution screen would apply. Accepted range is
+ * \ref mfly::kMinUiScale to \ref mfly::kMaxUiScale; values below 1 shrink it.
+ *
+ * A factor is a wish, not an instruction. On the very screen it is meant for it
+ * may ask for more room than there is, so \ref mfly::FlyoutWindow::Show compares
+ * the measured size with the work area and walks the factor back until it fits -
+ * but never below 1.0, so asking for a larger flyout can never hand out a
+ * smaller one. A reduction is written to the log.
+ *
+ * The touch overlay has no such setting: its trigger field and its zones are
+ * given in percent of the screen and are therefore already as large as the
+ * screen is.
+ *
+ * \section config_zone The zone object
+ *
+ * A \ref mfly::Zone is a rectangle in percent of the reference area - the work
+ * area or the full monitor, depending on \c "useWorkArea".
+ *
+ * | Field | Range | Default | Meaning |
+ * |---|---|---|---|
+ * | \c left   | 0 - 99  | \c 0   | Left edge in percent. |
+ * | \c top    | 0 - 99  | \c 0   | Top edge in percent. |
+ * | \c width  | 1 - 100 | \c 50  | Width in percent. |
+ * | \c height | 1 - 100 | \c 100 | Height in percent. |
+ *
+ * The ranges are exactly the ones \ref mfly::ZoneFromWindow clamps a measured
+ * zone to, so a line produced by Ctrl+Alt+F11 comes back out of the file as the
+ * window it was taken from.
+ *
+ * Zones are meant to tile the area without overlapping, the way the Windows snap
+ * layouts do - but nothing enforces it. Where they do overlap, the smallest one
+ * under the pointer wins (\ref mfly::SmallestHit), so a small tile drawn on top
+ * of a large one stays reachable. Fractions are allowed and are how thirds are
+ * spelled: \c 33.33 / \c 33.34 / \c 66.66.
+ *
+ * \section config_layout The layout object
+ *
+ * | Field | Type | Required | Meaning |
+ * |---|---|---|---|
+ * | \c name | string | no | Caption below the miniature, and the label in the touch trigger field. |
+ * | \c zones | array of \ref config_zone | yes | The tiles, in drawing order. A layout without a single usable zone is dropped silently. |
+ * | \c monitors | selector or array of selectors | no | Which screens the layout is offered on; omitted means all of them. The accepted forms are listed in \ref main_monitor_layouts on the main page. |
+ *
+ * \section config_touch The touch block
+ *
+ * Pick a window up by its title bar with the finger, rest it in the field that
+ * appears, and the zones unfold across the screen; let go over one of them and
+ * the window lands there. \ref mfly::DragWatcher notices the drag,
+ * \ref mfly::ZoneOverlay draws the target.
+ *
+ * | Key | Type | Default | Meaning |
+ * |---|---|---|---|
+ * | \c enabled | boolean | \c true | Whether the drag route is offered at all. (\ref mfly::TouchConfig::enabled) |
+ * | \c alsoMouse | boolean | \c false | React to a window dragged with the mouse as well. Off by default - with a mouse the flyout is the shorter way - and the way to try the overlay out on a machine without a touchscreen. (\ref mfly::TouchConfig::alsoMouse) |
+ * | \c dwellMs | integer, 0 - 5000 | \c 250 | How long the finger must rest in the trigger field before the zones unfold. Too short and merely carrying a window across the middle of the screen opens them. (\ref mfly::TouchConfig::dwellMs) |
+ * | \c trigger | \ref config_zone | 40 / 40 / 20 / 20 | Where the field sits, in percent of the same reference area the zones use. It only exists while a window is actually being dragged, so it may be generous. (\ref mfly::TouchConfig::trigger) |
+ * | \c layouts | array of \ref config_layout | the flyout's | The zone sets offered while dragging. (\ref mfly::TouchConfig::layouts) |
+ *
+ * Touch has its own layouts because it is a different task. Picking one of five
+ * miniatures with a mouse is a menu; doing it with a window already in mid-drag
+ * is not. So there is exactly **one** drop target: the first layout in
+ * \c touch.layouts whose \c "monitors" selector matches the screen the finger is
+ * on (\ref mfly::LayoutsForMonitor). Leave \c layouts out entirely and the
+ * flyout's layouts are used instead, so a configuration that never heard of
+ * touch gains the drag route without being edited.
+ *
+ * A screen no layout applies to simply shows no field there; the drag stays an
+ * ordinary drag, and moving to a screen that has one still works.
+ *
+ * \section config_errors When the file does not parse
+ *
+ * The application keeps running with the default values and reports line and
+ * column of the error - in the flyout as a clickable item, and on reload as a
+ * balloon on the tray icon (\ref mfly::Config::error). Nothing is silently half
+ * applied: either a load succeeds and replaces the configuration, or the
+ * previous values stay in place.
+ *
+ * Individual entries are more forgiving than the file as a whole. A layout
+ * without a usable zone, a zone that is not an object, a monitor selector that
+ * is neither a number nor a string - each is dropped and the rest is kept,
+ * because one malformed layout is not worth refusing a whole file over.
+ *
+ * \section config_examples Examples
+ *
+ * \subsection config_ex_laptop A small laptop screen
+ *
+ * The flyout enlarged, and only the two arrangements that are comfortable on a
+ * 13-inch panel. Thirds are deliberately absent - they are cramped there.
+ *
+ * \code{.js}
+ * {
+ *   "uiScale": 1.4,
+ *   "hoverDelayMs": 300,
+ *
+ *   "layouts": [
+ *     {
+ *       "name": "Halves",
+ *       "zones": [
+ *         { "left":  0, "top": 0, "width": 50, "height": 100 },
+ *         { "left": 50, "top": 0, "width": 50, "height": 100 },
+ *       ],
+ *     },
+ *     {
+ *       "name": "Quarters",
+ *       "zones": [
+ *         { "left":  0, "top":  0, "width": 50, "height": 50 },
+ *         { "left": 50, "top":  0, "width": 50, "height": 50 },
+ *         { "left":  0, "top": 50, "width": 50, "height": 50 },
+ *         { "left": 50, "top": 50, "width": 50, "height": 50 },
+ *       ],
+ *     },
+ *   ],
+ * }
+ * \endcode
+ *
+ * \subsection config_ex_two_screens An ultrawide next to a laptop
+ *
+ * Thirds belong on the wide screen, halves on the laptop panel, and the full
+ * screen everywhere. Every layout names the screens it is offered on, so each
+ * row of the flyout carries only what makes sense there.
+ *
+ * \code{.js}
+ * {
+ *   "showAllMonitors": true,
+ *
+ *   "layouts": [
+ *     {
+ *       "name": "Thirds",
+ *       "monitors": [ "3840x2160" ],
+ *       "zones": [
+ *         { "left":  0,    "top": 0, "width": 33.34, "height": 100 },
+ *         { "left": 33.33, "top": 0, "width": 33.34, "height": 100 },
+ *         { "left": 66.66, "top": 0, "width": 33.34, "height": 100 },
+ *       ],
+ *     },
+ *     {
+ *       "name": "Wide + two",
+ *       "monitors": [ "3840x2160" ],
+ *       "zones": [
+ *         { "left":  0, "top":  0, "width": 66, "height": 100 },
+ *         { "left": 66, "top":  0, "width": 34, "height":  50 },
+ *         { "left": 66, "top": 50, "width": 34, "height":  50 },
+ *       ],
+ *     },
+ *     {
+ *       "name": "Halves",
+ *       "monitors": [ "secondary" ],
+ *       "zones": [
+ *         { "left":  0, "top": 0, "width": 50, "height": 100 },
+ *         { "left": 50, "top": 0, "width": 50, "height": 100 },
+ *       ],
+ *     },
+ *     {
+ *       "name": "Full screen",
+ *       "zones": [
+ *         { "left": 0, "top": 0, "width": 100, "height": 100 },
+ *       ],
+ *     },
+ *   ],
+ * }
+ * \endcode
+ *
+ * The selectors may be mixed in one list - <code>[1, "secondary"]</code> is
+ * valid - and a screen that no layout applies to is left out of the flyout
+ * entirely. That is also the way to exclude one: give every layout a list that
+ * omits it.
+ *
+ * \subsection config_ex_tablet A tablet that turns
+ *
+ * Rotating a Surface changes its resolution, so the resolution selector is also
+ * an orientation selector. Two touch layouts, one per posture: side by side when
+ * the screen is wide, stacked when it is tall.
+ *
+ * \code{.js}
+ * {
+ *   "uiScale": 1.5,
+ *
+ *   "touch": {
+ *     "enabled": true,
+ *     "dwellMs": 250,
+ *     "trigger": { "left": 38, "top": 38, "width": 24, "height": 24 },
+ *
+ *     "layouts": [
+ *       {
+ *         "name": "Landscape",
+ *         "monitors": [ "2880x1920" ],
+ *         "zones": [
+ *           { "left":  0, "top":  0, "width": 50, "height": 100 },
+ *           { "left": 50, "top":  0, "width": 50, "height":  50 },
+ *           { "left": 50, "top": 50, "width": 50, "height":  50 },
+ *         ],
+ *       },
+ *       {
+ *         "name": "Portrait",
+ *         "monitors": [ "1920x2880" ],
+ *         "zones": [
+ *           { "left": 0, "top":  0, "width": 100, "height": 50 },
+ *           { "left": 0, "top": 50, "width": 100, "height": 50 },
+ *         ],
+ *       },
+ *     ],
+ *   },
+ * }
+ * \endcode
+ *
+ * The first matching layout is the one that shows, so the two lists must not
+ * both match the same screen - which is what the two resolutions guarantee.
+ *
+ * \subsection config_ex_touch_mouse Trying the touch route without a touchscreen
+ *
+ * \c "alsoMouse" makes the overlay react to a window dragged with the mouse, so
+ * the whole route can be developed and watched at a desk. Everything else stays
+ * as it is.
+ *
+ * \code{.js}
+ * {
+ *   "touch": {
+ *     "alsoMouse": true,
+ *     "dwellMs": 400,
+ *   },
+ * }
+ * \endcode
+ *
+ * A longer dwell helps here: a mouse crosses the middle of the screen faster and
+ * more often than a finger does.
+ *
+ * \subsection config_ex_items Text items only
+ *
+ * An explicitly empty layout list is a valid setting, and a different one from a
+ * missing key: it hides the miniature area instead of falling back to the
+ * built-in layouts. What remains is minimize, minimize to the notification area,
+ * always on top, minimize all windows of this app, minimize other windows and
+ * show desktop.
+ *
+ * \code{.js}
+ * {
+ *   "layouts": [],
+ *   "touch": { "enabled": false },
+ * }
+ * \endcode
+ *
+ * \subsection config_ex_debug Chasing an app that stays undetected
+ *
+ * Nothing here changes what the flyout offers - it changes what MinFlyout says
+ * about itself. \ref main_diagnosis explains how to read the result.
+ *
+ * \code{.js}
+ * {
+ *   // Log every gate of the detection, not just the successful ones.
+ *   "traceDetection": true,
+ *
+ *   // ... and keep it, so the log survives the next start.
+ *   "logToFile": true,
+ *
+ *   // Never ask the window, always compute - which shows whether the app
+ *   // answers WM_NCHITTEST at all or whether the geometry is what is wrong.
+ *   "buttonDetection": "computed",
+ * }
+ * \endcode
+ *
+ * Both log settings only take effect in a build with the logging macros compiled
+ * in (\c _DEBUG or \c _RELEASE_WITH_DEBUG_LOG). The Ctrl+Alt+F12 diagnosis works
+ * in a plain release build regardless, and says on its second line which of the
+ * two is running.
+ */

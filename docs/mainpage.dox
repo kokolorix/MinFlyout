@@ -23,6 +23,20 @@
  *                                └─ FlyoutWindow::Show(content, buttonRect, dpi)
  * ```
  *
+ * A finger has no hover and the minimize button is far too small for one, so
+ * touch takes a second route into the same \ref mfly::ApplyZone. There the
+ * window itself is the pointer:
+ *
+ * ```
+ * [WinEvent hook]                [controller UI thread]
+ * MOVESIZESTART ──PostMessage──▶ OnDragStart()
+ * (a window is being moved)       ├─ was the press a contact, on a caption?
+ *                                 ├─ ZoneOverlay::ShowTrigger(monitor, layout)
+ *                                 ├─ dwell in the field  ──▶  SwitchToZones()
+ * WH_MOUSE_LL   ──PostMessage──▶  ├─ ZoneOverlay::Track(point)
+ * MOVESIZEEND   ──PostMessage──▶  └─ ApplyZone(window, zone, monitor)
+ * ```
+ *
  * \section main_design Design decisions
  *
  * - **No DLL injection, no CBT hooks.** Nothing is loaded into a foreign
@@ -48,17 +62,41 @@
  *   \c DWMWA_EXTENDED_FRAME_BOUNDS is subtracted, otherwise a gap opens up
  *   between two windows placed side by side
  *   (\ref mfly::ApplyZone).
+ * - **Windows announces the drag.** \c EVENT_SYSTEM_MOVESIZESTART and
+ *   \c ..._MOVESIZEEND bracket the modal loop \c DefWindowProc runs while a
+ *   window is dragged. Registered \c WINEVENT_OUTOFCONTEXT, the callback arrives
+ *   on our own message loop - the same promise the detection makes, and cheaper
+ *   than guessing a drag from mouse movements (\ref mfly::DragWatcher).
+ * - **The touch overlay never takes input.** \c WS_EX_TRANSPARENT plus
+ *   \c WS_EX_NOACTIVATE: every touch point passes straight through to the window
+ *   being dragged, and where the finger is comes from the mouse hook that
+ *   already exists. Nothing the overlay does can interrupt the drag it is drawn
+ *   for (\ref mfly::ZoneOverlay).
+ * - **Move is told from resize by the press, not by the event.**
+ *   \c MOVESIZESTART brackets both, so the hit test has to happen at the moment
+ *   of the press - before the window disappears into its loop and stops
+ *   answering (\ref mfly::AppController::RememberPress).
+ * - **One arithmetic for both windows.** Percent to pixels, the gap between
+ *   tiles and the rule for overlapping zones live in OverlayGeometry.h, free of
+ *   Windows dependencies and covered by \c tests/OverlayGeometryTest.cpp. The
+ *   flyout's miniature and the full-screen overlay therefore draw the same zone
+ *   as the same rectangle.
  *
  * \section main_modules Modules
  *
  * | Module | Content |
  * |---|---|
  * | \ref app    | \ref mfly::AppController, state machine, entry point |
- * | \ref detect | \ref mfly::HookThread, \ref mfly::ProbeMinimizeButton, \ref mfly::CaptionButtonRect |
- * | \ref ui     | \ref mfly::FlyoutWindow, \ref mfly::EnumerateMonitors, \ref mfly::TrayStash |
+ * | \ref detect | \ref mfly::HookThread, \ref mfly::DragWatcher, \ref mfly::ProbeMinimizeButton, \ref mfly::CaptionButtonRect |
+ * | \ref ui     | \ref mfly::FlyoutWindow, \ref mfly::ZoneOverlay, \ref mfly::PercentToPixels, \ref mfly::EnumerateMonitors, \ref mfly::TrayStash |
  * | \ref config | \ref mfly::ConfigStore, \ref mfly::SelectorMatches, \ref mfly::Registry, \ref mfly::ApplyZone |
  *
  * \section main_config Configuration file
+ *
+ * \subpage page_config has every key with its default and its range, together
+ * with complete example files for a small laptop, two screens of different
+ * shape, a tablet that turns, and a session spent chasing an app that stays
+ * undetected. What follows here is the shape of the file.
  *
  * On first start \c \%APPDATA%\\MinFlyout\\config.jsonc is created with a
  * commented template. The format is JSONC - comments and trailing commas are
@@ -71,6 +109,7 @@
  *   "showBuiltinItems": true,  // show the text items below the layouts
  *   "useWorkArea": true,       // compute percentages without the taskbar
  *   "showAllMonitors": true,   // offer every screen, not just the current one
+ *   "uiScale": 1.0,            // size factor of the flyout (see page_config)
  *   "buttonDetection": "auto", // ask the window, compute when it stays silent
  *
  *   "layouts": [
@@ -87,6 +126,12 @@
  *       "zones": [ ... ],              // as above
  *     },
  *   ],
+ *
+ *   "touch": {                         // dragging a window into a zone by finger
+ *     "dwellMs": 250,
+ *     "trigger": { "left": 40, "top": 40, "width": 20, "height": 20 },
+ *     "layouts": [ ... ],              // shaped like "layouts" above
+ *   },
  * }
  * \endcode
  *
@@ -204,6 +249,17 @@
  * second line which of the two builds is running, and carries
  * \ref mfly::BuildStamp so a stale EXE gives itself away.
  *
+ * The report prints two DPI values, and telling them apart explains a whole
+ * class of failures. \c GetDpiForWindow answers with the DPI a window *thinks*
+ * in - its awareness context - which for an application that is not
+ * per-monitor aware is 96 however large DWM actually draws it. MinFlyout is
+ * \c PerMonitorV2 and reads physical coordinates, so everything it measures
+ * against the glass uses the screen's DPI instead
+ * (\ref mfly::DpiForWindowMonitor). Where the two lines differ, the window is
+ * one of those applications; where the caption arithmetic once used the wrong
+ * one, its region came out at a fraction of its proper size and the pre-filter
+ * rejected a cursor that was sitting right on the button.
+ *
  * \c "traceDetection": \c true adds one line per gate of the detection, so a
  * movement that never reaches the probe can be followed to the gate it died at.
  *
@@ -241,16 +297,62 @@
  * area is omitted and only the text items appear. The same happens to a screen
  * that no layout applies to - it gets no row at all.
  *
+ * On a small panel the flyout comes out small - correct in millimetres and
+ * awkward to hit. \c "uiScale" multiplies the DPI it is laid out for, so fonts,
+ * paddings and miniatures grow together; \ref config_uiscale has the details and
+ * the rule that keeps an over-eager factor from pushing the flyout off the
+ * screen.
+ *
+ * \section main_touch Dragging a window into a zone by finger
+ *
+ * The flyout is a menu: it is pointed at and clicked. The touch overlay is a
+ * target: it appears underneath a window that is already in motion and says
+ * where the window may be let go.
+ *
+ * ```
+ *   [None] ──window picked up by its caption──▶ [Watching] ──finger rests──▶ [Zones]
+ *      ▲          (contact, resizable)               │                          │
+ *      └──────────────────────────────────────────────┴─────────────────────────┘
+ *          let go, ESC, or the move loop ended - a zone under the finger is applied
+ * ```
+ *
+ * \ref mfly::ZoneOverlay draws two phases on one window: the trigger field
+ * configured by \c touch.trigger, and after \c touch.dwellMs the zones of the
+ * touch layout across the whole monitor. It is layered, so DWM composites it and
+ * the window travelling underneath does not make it flicker; transparency is a
+ * color key plus one constant alpha rather than per-pixel alpha, which keeps
+ * ordinary \c WM_PAINT drawing - and with it the shared helpers in Painting.h -
+ * working unchanged. GDI text writes no alpha channel, so per-pixel alpha would
+ * mean composing every label by hand.
+ *
+ * The drop waits for the loop to end. A window still finishing its move loop
+ * would overwrite anything positioned during it, so \c MOVESIZEEND is the
+ * signal; where an application never sends one, a short grace after the finger
+ * lifts applies the zone anyway, and the poll timer withdraws an overlay whose
+ * drag was lost altogether.
+ *
+ * Whether a press came from a finger is read from
+ * \c MSLLHOOKSTRUCT::dwExtraInfo, which Windows stamps when it promotes a
+ * contact to a mouse message (\ref mfly::FromPenOrTouch). Where that marker does
+ * not arrive, \c "touch.alsoMouse" makes the route work for every drag
+ * regardless of what caused it - which is also how the overlay is tried out on a
+ * machine without a touchscreen. \ref config_touch lists the settings,
+ * \ref config_ex_tablet shows a tablet configured for both of its postures.
+ *
  * \section main_build Building
  *
  * - **Visual Studio 2022:** open \c MinFlyout.sln, pick a configuration, F7.
  *   Projects: \c minflyout (EXE), \c json_tests (the unit tests for the JSONC
- *   parser and the monitor selectors, run immediately after building) and \c docs (generates this documentation; not built
+ *   parser, the monitor selectors and the caption geometry, run immediately
+ *   after building) and \c docs (generates this documentation; not built
  *   automatically). Shared settings live in \c MinFlyout.props - in particular
  *   \c /utf-8, without which the UTF-8 literals are misinterpreted.
  * - **CMake:** \c "cmake -S . -B build" and \c "cmake --build build";
  *   \c "ctest --test-dir build" runs the unit tests,
- *   \c "cmake --build build --target docs" generates the documentation.
+ *   \c "cmake --build build --target docs" generates the documentation. Besides
+ *   \c json_tests there is \c overlay_tests for the overlay arithmetic - a
+ *   separate target because it carries its own \c main, and because the three
+ *   sources \c json_tests names are not currently in the working tree.
  *
  * \section main_logging Logging
  *
@@ -319,6 +421,10 @@
  * Leaving it, clicking elsewhere or ESC closes it again; a click on the button
  * itself minimizes as usual.
  *
+ * With a finger: drag a window by its title bar, rest it in the field that
+ * appears, and let go over one of the zones that unfold (\ref main_touch).
+ * Letting go anywhere else does nothing - the drag stays an ordinary drag.
+ *
  * Two hotkeys work anywhere: **Ctrl+Alt+F11** copies the zone of the active
  * window as a configuration line (\ref main_capture), **Ctrl+Alt+F12** writes
  * the detection diagnosis for the window under the cursor
@@ -343,7 +449,26 @@
  *   which of the two ways is used, and a failed detection is written to the log
  *   with the class name and the \c HT code the window returned.
  * - **Non-resizable windows** (without \c WS_THICKFRAME) show the size items
- *   greyed out.
+ *   greyed out, and cannot start a touch drag either.
+ * - **A window that is not per-monitor DPI aware rests on the estimate alone.**
+ *   All three of the precise answers fail together on such a window, and each
+ *   for its own reason: it reports 96 dpi however large DWM draws it, it answers
+ *   \c WM_NCHITTEST over its caption buttons with \c HTCAPTION rather than
+ *   \c HTMINBUTTON, and \c DWMWA_CAPTION_BUTTON_BOUNDS comes back in a
+ *   coordinate space that mixes the window's own scale with the screen's - a
+ *   well-formed rectangle sitting in the middle of the caption, which is what
+ *   the flush-edge test in \ref mfly::CaptionBlockFromDwm exists to catch. What
+ *   carries these windows is the last rung of the ladder: the visible frame plus
+ *   the screen's title bar height. It holds up in practice, but it is a
+ *   computation, so this is the class of window most likely to need a
+ *   Ctrl+Alt+F12 report.
+ * - **The touch overlay stays on one screen.** The trigger field follows the
+ *   finger from monitor to monitor, but once the zones are unfolded they belong
+ *   to the screen they opened on. Moving a window to another screen is what the
+ *   flyout is for.
+ * - **Touch is told from mouse by a marker**, not by a separate input path, so
+ *   the distinction is only as good as \c MSLLHOOKSTRUCT::dwExtraInfo. Where it
+ *   does not arrive, \c "touch.alsoMouse" makes the route work regardless.
  * - **Stashed windows:** \ref mfly::TrayStash restores them on exit and on
  *   \c WM_QUERYENDSESSION; a crash of the host would leave them behind
  *   invisible.

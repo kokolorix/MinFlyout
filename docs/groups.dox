@@ -14,11 +14,24 @@
  * Consists of two parts: \ref mfly::HookThread delivers the mouse events
  * without holding up the system input path, and \ref CaptionProbe.h answers via
  * \c WM_NCHITTEST the question of what lies under the pointer.
+ *
+ * \ref mfly::DragWatcher belongs here as the touch counterpart: a finger cannot
+ * hover a minimize button, so what is noticed instead is a window entering its
+ * move loop - which Windows announces, and which needs no hook in the input path
+ * at all.
  */
 
 /**
  * \defgroup ui User interface
- * \brief The flyout itself and stashing into the notification area.
+ * \brief The two windows, the monitors they draw, and stashing into the
+ *        notification area.
+ *
+ * \ref mfly::FlyoutWindow is a menu: it is pointed at and clicked.
+ * \ref mfly::ZoneOverlay is a target: it appears underneath a window that is
+ * already in motion and says where it may be let go. They share their palette
+ * and drawing primitives (\ref Painting.h) and the arithmetic that turns a zone
+ * into a rectangle (\ref OverlayGeometry.h), so the miniature in the one and the
+ * full-screen tile in the other really are the same zone.
  */
 
 /**

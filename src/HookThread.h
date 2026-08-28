@@ -30,8 +30,8 @@ public:
      *
      * Blocks until the hook is up (at most five seconds).
      *
-     * \param owner Window that receives \ref WM_MFLY_MOUSEMOVE, \ref WM_MFLY_MOUSEDOWN
-     *              and \ref WM_MFLY_CANCEL.
+     * \param owner Window that receives \ref WM_MFLY_MOUSEMOVE, \ref WM_MFLY_MOUSEDOWN,
+     *              \ref WM_MFLY_MOUSEUP and \ref WM_MFLY_CANCEL.
      * \return \c true if the hook could be installed.
      */
     bool Start(HWND owner);
@@ -94,6 +94,32 @@ public:
 
     /// \return \c true if the mouse hook is currently installed.
     static bool Installed();
+
+    /**
+     * \brief Reports how the last button press reached the system.
+     *
+     * The callback keeps the extra information of the event instead of
+     * evaluating it, so the decision "was that a finger?" can be taken on the
+     * UI thread where it belongs. Read it while handling
+     * \ref WM_MFLY_MOUSEDOWN, or when \ref WM_MFLY_DRAGSTART arrives - the
+     * press that started a drag is always the last one seen.
+     *
+     * \return \c MSLLHOOKSTRUCT::dwExtraInfo of the last button press, or 0.
+     * \see FromPenOrTouch, FromTouch
+     */
+    static ULONG_PTR LastDownExtraInfo();
+
+    /**
+     * \brief Position of the last button release.
+     *
+     * \ref WM_MFLY_DRAGEND can arrive a moment after the finger has left the
+     * glass, and \c GetCursorPos would then report where the pointer ended up
+     * rather than where the window was dropped. The hook has the right point,
+     * so it keeps it.
+     *
+     * \return The release point in screen coordinates.
+     */
+    static POINT LastUpPoint();
 
 private:
     /**

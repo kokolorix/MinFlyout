@@ -39,7 +39,19 @@
     <ClCompile Include="src\HookThread.cpp">
       <Filter>Detection</Filter>
     </ClCompile>
+    <ClCompile Include="src\DragWatcher.cpp">
+      <Filter>Detection</Filter>
+    </ClCompile>
     <ClCompile Include="src\FlyoutWindow.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ZoneOverlay.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="src\OverlayGeometry.cpp">
+      <Filter>UI</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Painting.cpp">
       <Filter>UI</Filter>
     </ClCompile>
     <ClCompile Include="src\TrayStash.cpp">
@@ -92,7 +104,19 @@
     <ClInclude Include="src\HookThread.h">
       <Filter>Detection</Filter>
     </ClInclude>
+    <ClInclude Include="src\DragWatcher.h">
+      <Filter>Detection</Filter>
+    </ClInclude>
     <ClInclude Include="src\FlyoutWindow.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ZoneOverlay.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\OverlayGeometry.h">
+      <Filter>UI</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Painting.h">
       <Filter>UI</Filter>
     </ClInclude>
     <ClInclude Include="src\TrayStash.h">

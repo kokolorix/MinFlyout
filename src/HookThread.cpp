@@ -27,6 +27,36 @@ std::atomic<unsigned long long> g_movesSeen{0};
 /// Movements actually posted to the controller.
 std::atomic<unsigned long long> g_movesPosted{0};
 
+/// Extra information of the last button press - pen, touch or mouse.
+std::atomic<ULONG_PTR> g_lastDownExtra{0};
+
+/// Screen position of the last button release, x in the low half, y in the high.
+std::atomic<unsigned long long> g_lastUpPoint{0};
+
+/**
+ * \brief Packs a point into one atomically readable value.
+ *
+ * Two separate atomics could be read between two events and yield a point that
+ * never existed; one 64-bit word cannot.
+ *
+ * \param pt Point in screen coordinates.
+ * \return The packed value.
+ */
+unsigned long long PackPoint(POINT pt) {
+    return (static_cast<unsigned long long>(static_cast<unsigned int>(pt.x))) |
+           (static_cast<unsigned long long>(static_cast<unsigned int>(pt.y)) << 32);
+}
+
+/**
+ * \brief Unpacks what \ref PackPoint produced.
+ * \param value Packed value.
+ * \return The point.
+ */
+POINT UnpackPoint(unsigned long long value) {
+    return POINT{static_cast<LONG>(static_cast<int>(value & 0xFFFFFFFFull)),
+                 static_cast<LONG>(static_cast<int>((value >> 32) & 0xFFFFFFFFull))};
+}
+
 HHOOK g_mouseHook = nullptr;   // used on the hook thread only
 HHOOK g_keyHook = nullptr;
 
@@ -51,7 +81,19 @@ LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
             case WM_LBUTTONDOWN:
             case WM_RBUTTONDOWN:
             case WM_MBUTTONDOWN:
+                // Keep the marker, do not interpret it: whether this was a
+                // finger decides nothing here, and the callback sits in the
+                // input path.
+                if (auto* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam)) {
+                    g_lastDownExtra.store(ms->dwExtraInfo, std::memory_order_relaxed);
+                }
                 ::PostMessageW(owner, WM_MFLY_MOUSEDOWN, 0, 0);
+                break;
+            case WM_LBUTTONUP:
+                if (auto* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam)) {
+                    g_lastUpPoint.store(PackPoint(ms->pt), std::memory_order_relaxed);
+                }
+                ::PostMessageW(owner, WM_MFLY_MOUSEUP, 0, 0);
                 break;
             default:
                 break;
@@ -94,6 +136,14 @@ bool HookThread::MovePending() {
 
 bool HookThread::Installed() {
     return g_mouseHook != nullptr;
+}
+
+ULONG_PTR HookThread::LastDownExtraInfo() {
+    return g_lastDownExtra.load(std::memory_order_relaxed);
+}
+
+POINT HookThread::LastUpPoint() {
+    return UnpackPoint(g_lastUpPoint.load(std::memory_order_relaxed));
 }
 
 void HookThread::SetPaused(bool paused) {

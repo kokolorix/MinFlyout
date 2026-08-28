@@ -40,6 +40,16 @@ constexpr int kHotkeyCaptureZone = 2;
 constexpr int kWatchdogStrikes = 3;
 
 /**
+ * \brief How long to wait for \c EVENT_SYSTEM_MOVESIZEEND after the finger lifted.
+ *
+ * The window is still finishing its move loop when the button goes up, and a
+ * position set during that loop would be overwritten by it. Long enough for the
+ * loop to unwind, short enough that a window whose application never reports
+ * the end still lands where it was dropped.
+ */
+constexpr UINT kDropGraceMs = 250;
+
+/**
  * \brief Reports whether a window is worth measuring for a zone.
  *
  * \ref IsIgnoredWindow already covers our own windows, the shell and everything
@@ -100,6 +110,14 @@ bool AppController::Init(HINSTANCE instance) {
         return false;
     }
 
+    // The overlay is optional: without it the flyout still works, so a failure
+    // here costs the touch drag and nothing else.
+    if (!overlay_.Create(instance)) {
+        WRITE_WARNING_LOG(L"Overlay window could not be created, "
+                          L"dragging a window into a zone is unavailable",
+                          log::dformat(L"error {}", ::GetLastError()));
+    }
+
     TrayStash::Instance().Init(hwnd_);
 
     ConfigStore::Instance().Reload();  // creates the template on first run
@@ -122,6 +140,12 @@ bool AppController::Init(HINSTANCE instance) {
         WRITE_ERROR_LOG(L"Mouse hook could not be installed",
                         log::dformat(L"error {}", ::GetLastError()));
         return false;
+    }
+
+    // Same deal as the overlay: nice to have, never a reason not to start.
+    if (!dragger_.Start(hwnd_)) {
+        WRITE_WARNING_LOG(L"Move/size watcher unavailable, "
+                          L"dragging a window into a zone is unavailable");
     }
 
     ::SetTimer(hwnd_, kTimerPoll, 400, nullptr);
@@ -159,13 +183,16 @@ void AppController::Shutdown() {
         ::UnregisterHotKey(hwnd_, kHotkeyCaptureZone);
         hotkeyZoneOk_ = false;
     }
+    EndDrag(/*applyZone=*/false);
     CloseFlyout(false);
+    dragger_.Stop();
     hooks_.Stop();
     watcher_.Stop();
 
     // Hidden foreign windows MUST come back.
     TrayStash::Instance().RestoreAll();
     RemoveAppTrayIcon();
+    overlay_.Destroy();
     flyout_.Destroy();
 
     if (hwnd_) { ::DestroyWindow(hwnd_); hwnd_ = nullptr; }
@@ -192,6 +219,13 @@ void AppController::HandleMouseMove() {
 
     POINT pt{};
     if (!::GetCursorPos(&pt)) return;
+
+    // A window in mid-drag owns the pointer. The button detection would only
+    // fight it for the caption travelling underneath, so it stands aside.
+    if (dragState_ != DragState::None) {
+        OnDragMove(pt);
+        return;
+    }
 
     const RECT hotZone = InflateCopy(hit_.buttonRect, 2, 2);
 
@@ -309,6 +343,9 @@ void AppController::LogDetectionMiss(HWND window, POINT pt) {
 }
 
 void AppController::HandleMouseDown() {
+    // First, because the window pressed has not entered its move loop yet.
+    RememberPress();
+
     if (state_ == State::Idle) return;
 
     POINT pt{};
@@ -319,6 +356,163 @@ void AppController::HandleMouseDown() {
     // Click on the button itself or anywhere else: cancel.
     if (state_ == State::Armed) ::KillTimer(hwnd_, kTimerHover);
     CloseFlyout(/*suppressUntilLeave=*/true);
+}
+
+// --- Touch drag ------------------------------------------------------------
+
+void AppController::RememberPress() {
+    pressOnCaption_ = false;
+
+    const TouchConfig& touch = ConfigStore::Instance().current().touch;
+    if (!touch.enabled || paused_) return;
+
+    pressWasContact_ = FromPenOrTouch(HookThread::LastDownExtraInfo());
+    if (!pressWasContact_ && !touch.alsoMouse) return;
+
+    POINT pt{};
+    if (!::GetCursorPos(&pt)) return;
+
+    HWND under = ::WindowFromPoint(pt);
+    HWND root = under ? ::GetAncestor(under, GA_ROOT) : nullptr;
+    if (!root || IsIgnoredWindow(root)) return;
+
+    // The only question here: is this the title bar? Everything else about the
+    // drag is decided later, on the same thread, when Windows announces it.
+    pressOnCaption_ = HitTestCode(root, pt) == HTCAPTION;
+}
+
+void AppController::OnDragStart(HWND window) {
+    if (dragState_ != DragState::None) EndDrag(/*applyZone=*/false);
+
+    const Config& config = ConfigStore::Instance().current();
+    if (paused_ || !config.touch.enabled) return;
+    if (!pressWasContact_ && !config.touch.alsoMouse) return;
+
+    // MOVESIZESTART brackets sizing just as much as moving. What separates the
+    // two is where the press landed, and that was settled before the window
+    // disappeared into its modal loop.
+    if (!pressOnCaption_) return;
+    if (!IsMeasurable(window) || !IsResizable(window)) return;
+
+    POINT pt{};
+    if (!::GetCursorPos(&pt)) return;
+
+    // The two ways of picking a zone do not share the screen.
+    CloseFlyout(/*suppressUntilLeave=*/true);
+
+    dragWindow_ = window;
+    dragState_ = DragState::Watching;
+    hooks_.SetKeyboardHookEnabled(true);  // ESC withdraws the overlay
+
+    // A screen no layout applies to simply shows no field; the drag stays an
+    // ordinary drag there, and moving to a screen that has one still works.
+    ShowTriggerFor(pt);
+    WRITE_INFO_LOG(L"Touch drag started", log::Describe(window));
+}
+
+bool AppController::ShowTriggerFor(POINT pt) {
+    const Config& config = ConfigStore::Instance().current();
+
+    const HMONITOR handle = ::MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    const std::vector<MonitorEntry> monitors = EnumerateMonitors();
+
+    // Remembered even when nothing can be shown here, so a screen without a
+    // touch layout is not re-examined on every single movement.
+    dragMonitor_ = handle;
+
+    for (const MonitorEntry& entry : monitors) {
+        if (entry.handle != handle) continue;
+
+        // Touch has its own layouts; an empty section means "the ones the
+        // flyout offers", so a configuration that never heard of touch still
+        // gets a drop target.
+        const std::vector<Layout>& source =
+            config.touch.layouts.empty() ? config.layouts : config.touch.layouts;
+
+        const std::vector<Layout> offered = LayoutsForMonitor(source, entry);
+        if (!offered.empty() &&
+            overlay_.ShowTrigger(entry, offered.front(), config.touch.trigger,
+                                 config.useWorkArea)) {
+            return true;
+        }
+        break;
+    }
+
+    overlay_.Hide();
+    return false;
+}
+
+void AppController::OnDragMove(POINT pt) {
+    if (dragState_ == DragState::Zones) {
+        overlay_.Track(pt);
+        return;
+    }
+
+    // Following the finger from screen to screen is also how the overlay picks
+    // up the other monitor's DPI and the layout configured for it.
+    if (::MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST) != dragMonitor_) {
+        StopDwell();
+        ShowTriggerFor(pt);
+        return;
+    }
+
+    const RectI field = overlay_.triggerRect();
+    const bool inside = !field.empty() &&
+                        field.contains(static_cast<int>(pt.x), static_cast<int>(pt.y));
+
+    if (inside && !dwellRunning_) {
+        // Merely carrying a window across the middle of the screen must not
+        // unfold the zones - resting there has to mean something.
+        ::SetTimer(hwnd_, kTimerDwell,
+                   ConfigStore::Instance().current().touch.dwellMs, nullptr);
+        dwellRunning_ = true;
+    } else if (!inside && dwellRunning_) {
+        StopDwell();
+    }
+}
+
+void AppController::StopDwell() {
+    if (!dwellRunning_) return;
+    ::KillTimer(hwnd_, kTimerDwell);
+    dwellRunning_ = false;
+}
+
+void AppController::StopDropGrace() {
+    if (!dropGraceRunning_) return;
+    ::KillTimer(hwnd_, kTimerDrop);
+    dropGraceRunning_ = false;
+}
+
+void AppController::EndDrag(bool applyZone) {
+    if (dragState_ == DragState::None) return;
+
+    // Read everything out before the overlay forgets it.
+    const int hot = overlay_.hot();
+    const HWND window = dragWindow_;
+    const HMONITOR monitor = overlay_.monitor();
+    const std::wstring layoutName = overlay_.layoutName();
+    const Zone zone = hot >= 0 ? overlay_.zoneAt(static_cast<size_t>(hot)) : Zone{};
+    const bool useWorkArea = ConfigStore::Instance().current().useWorkArea;
+
+    StopDwell();
+    StopDropGrace();
+    overlay_.Hide();
+    dragState_ = DragState::None;
+    dragWindow_ = nullptr;
+    dragMonitor_ = nullptr;
+
+    // The flyout may have opened again in the meantime; leave its hook alone.
+    hooks_.SetKeyboardHookEnabled(state_ == State::Open);
+
+    if (!applyZone || hot < 0 || !window || !::IsWindow(window)) {
+        WRITE_DEBUG_LOG(L"Touch drag ended without a zone");
+        return;
+    }
+
+    const log::Stopwatch actionTime;
+    ApplyZone(window, zone, monitor, useWorkArea);
+    WRITE_INFO_LOG(log::dformat(L"Window dropped into zone {} of '{}'", hot, layoutName),
+                   log::Describe(window), actionTime.ElapsedMs());
 }
 
 void AppController::WriteDiagnosis() {
@@ -482,7 +676,14 @@ void AppController::OpenFlyout() {
     ctx_.targetThreadId = ::GetWindowThreadProcessId(hit_.window, &ctx_.targetProcessId);
     ctx_.buttonRect = hit_.buttonRect;
     ctx_.windowRect = hit_.windowRect;
-    ctx_.dpi = DpiForWindowCompat(hit_.window);
+    // The screen the flyout will appear on, not the DPI the target window
+    // thinks in - an application that is not per-monitor aware reports 96 on a
+    // 175 % display, and the flyout would come out a third of its proper size
+    // beside it. The anchor decides, because that is what FlyoutWindow::Show
+    // positions against on a mixed-DPI desktop.
+    const POINT anchorCentre{(hit_.buttonRect.left + hit_.buttonRect.right) / 2,
+                             (hit_.buttonRect.top + hit_.buttonRect.bottom) / 2};
+    ctx_.dpi = DpiForPoint(anchorCentre);
 
     const Config& config = ConfigStore::Instance().current();
     const log::Stopwatch collectTime;
@@ -524,7 +725,9 @@ void AppController::OpenFlyout() {
 
     const size_t itemCount = content.items.size();
     const size_t rowCount = content.rows.size();
-    flyout_.Show(std::move(content), hit_.buttonRect, ctx_.dpi);
+    // ctx_.dpi stays the real DPI - the providers and the actions mean the
+    // screen by it. Only the layout is enlarged.
+    flyout_.Show(std::move(content), hit_.buttonRect, ctx_.dpi, config.uiScale);
     state_ = State::Open;
     hooks_.SetKeyboardHookEnabled(true);
     WRITE_INFO_LOG(log::dformat(L"Flyout opened: {} zones on {} of {} monitors, {} items, {} dpi",
@@ -617,7 +820,10 @@ void AppController::RemoveAppTrayIcon() {
 void AppController::SetPaused(bool paused) {
     paused_ = paused;
     hooks_.SetPaused(paused);
-    if (paused_) CloseFlyout(false);
+    if (paused_) {
+        EndDrag(/*applyZone=*/false);
+        CloseFlyout(false);
+    }
     WRITE_INFO_LOG(paused ? L"Detection paused" : L"Detection resumed");
 }
 
@@ -731,8 +937,34 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         HandleMouseDown();
         return 0;
 
+    case WM_MFLY_MOUSEUP:
+        // The finger has left the glass, but the window is still finishing its
+        // move loop and would overwrite anything positioned now. Wait for
+        // MOVESIZEEND, and give up on it after a short grace - an app that
+        // never reports it should not cost the user the drop.
+        if (dragState_ != DragState::None && !dropGraceRunning_) {
+            ::SetTimer(hwnd_, kTimerDrop, kDropGraceMs, nullptr);
+            dropGraceRunning_ = true;
+        }
+        return 0;
+
+    case WM_MFLY_DRAGSTART:
+        OnDragStart(reinterpret_cast<HWND>(lParam));
+        return 0;
+
+    case WM_MFLY_DRAGEND:
+        if (dragState_ != DragState::None &&
+            reinterpret_cast<HWND>(lParam) == dragWindow_) {
+            EndDrag(/*applyZone=*/true);
+        }
+        return 0;
+
     case WM_MFLY_CANCEL:
-        CloseFlyout(/*suppressUntilLeave=*/true);
+        if (dragState_ != DragState::None) {
+            EndDrag(/*applyZone=*/false);
+        } else {
+            CloseFlyout(/*suppressUntilLeave=*/true);
+        }
         return 0;
 
     case WM_MFLY_INVOKE:
@@ -800,12 +1032,41 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             graceRunning_ = false;
             CloseFlyout(false);
             return 0;
+        case kTimerDwell:
+            StopDwell();
+            if (dragState_ == DragState::Watching) {
+                overlay_.SwitchToZones();
+                if (overlay_.phase() == ZoneOverlay::Phase::Zones) {
+                    dragState_ = DragState::Zones;
+                    POINT pt{};
+                    if (::GetCursorPos(&pt)) overlay_.Track(pt);
+                }
+            }
+            return 0;
+
+        case kTimerDrop:
+            // MOVESIZEEND did not come. The button is up, so the move loop is
+            // over one way or another - apply what the finger was over.
+            StopDropGrace();
+            WRITE_WARNING_LOG(L"Drag ended without MOVESIZEEND",
+                              log::Describe(dragWindow_));
+            EndDrag(/*applyZone=*/true);
+            return 0;
+
         case kTimerPoll:
             TrayStash::Instance().DropDeadWindows();
             CheckHookAlive();
             if (state_ == State::Open &&
                 (!::IsWindow(hit_.window) || ::IsIconic(hit_.window))) {
                 CloseFlyout(false);
+            }
+            // Nothing may leave a full-screen overlay behind: if no button is
+            // down and no drop is pending, there is no drag left to draw for.
+            if (dragState_ != DragState::None && !dropGraceRunning_ &&
+                (::GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0) {
+                WRITE_WARNING_LOG(L"Touch drag lost, overlay withdrawn",
+                                  log::Describe(dragWindow_));
+                EndDrag(/*applyZone=*/false);
             }
             return 0;
         default:

@@ -102,11 +102,18 @@ public:
      * it flips above the button. The extent is clamped to the work area of the
      * monitor involved.
      *
+     * \p scale is folded into \p dpi (see \ref mfly::ScaledDpi), so one number
+     * enlarges fonts, paddings and miniatures together. Where the result would
+     * not fit on the screen the factor is reduced until it does - but never
+     * below 1.0, so asking for a larger flyout can never produce a smaller one
+     * than the same screen would have shown anyway.
+     *
      * \param content Monitors, layouts and items (taken over).
      * \param anchor  Button rectangle in screen coordinates.
      * \param dpi     DPI of the target monitor.
+     * \param scale   Config::uiScale.
      */
-    void Show(FlyoutContent content, const RECT& anchor, UINT dpi);
+    void Show(FlyoutContent content, const RECT& anchor, UINT dpi, double scale);
 
     /// Hides the flyout; the content stays around.
     void Hide();
@@ -153,6 +160,9 @@ private:
      */
     void Measure(UINT dpi, SIZE& size);
 
+    /// Recreates the three fonts for \ref dpi_; the old ones are freed first.
+    void CreateFonts();
+
     /**
      * \brief Draws the whole content (through a memory DC).
      * \param hdc Target device context.
@@ -191,15 +201,6 @@ private:
      * \param index New index into \ref hotspots_, or -1 for none.
      */
     void SetHotZone(int index);
-
-    /**
-     * \brief Creates the UI font from the system metrics.
-     * \param dpi   Target DPI.
-     * \param bold  \c true for the semibold variant.
-     * \param small \c true for the smaller caption font.
-     * \return New font; the caller takes ownership.
-     */
-    HFONT CreateUiFont(UINT dpi, bool bold, bool small) const;
 
     HWND   hwnd_ = nullptr;      ///< Own window.
     HWND   notify_ = nullptr;    ///< Recipient of the notifications (controller).

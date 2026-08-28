@@ -18,6 +18,75 @@
           "minLength": 1
         }
       ]
+    },
+    "zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A rectangle in percent of the reference area (see useWorkArea).",
+      "properties": {
+        "left": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 99,
+          "default": 0,
+          "description": "Left edge in percent of the monitor."
+        },
+        "top": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 99,
+          "default": 0,
+          "description": "Top edge in percent of the monitor."
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "default": 50,
+          "description": "Width in percent of the monitor."
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "default": 100,
+          "description": "Height in percent of the monitor."
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zones"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Caption below the miniature."
+        },
+        "monitors": {
+          "description": "Screens this layout is offered on. Omit it for all of them; entries may be mixed. A screen without a single matching layout is left out of the flyout.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/monitorSelector"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/definitions/monitorSelector"
+              }
+            }
+          ]
+        },
+        "zones": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The tiles of this layout. Meant to tile the screen without overlapping.",
+          "items": {
+            "$ref": "#/definitions/zone"
+          }
+        }
+      }
     }
   },
   "properties": {
@@ -54,6 +123,13 @@
       "default": true,
       "description": "true: draw one row per monitor, so a window can be moved across screens. false: only the monitor the window is on."
     },
+    "uiScale": {
+      "type": "number",
+      "minimum": 0.75,
+      "maximum": 3,
+      "default": 1,
+      "description": "Size factor of the flyout, on top of the scaling Windows already does for the screen resolution. 1.0 is the normal size; around 1.4 is a good starting point on a small laptop panel. Fonts, paddings and miniatures grow together, and the factor is reduced where the result would not fit on the screen."
+    },
     "buttonDetection": {
       "type": "string",
       "enum": ["auto", "hittest", "computed"],
@@ -79,67 +155,40 @@
       "type": "array",
       "description": "Layouts offered in the flyout. Each one is drawn as a miniature of the monitor. An empty array hides the miniature area; a missing property falls back to the built-in layouts.",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["zones"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Caption below the miniature."
-          },
-          "monitors": {
-            "description": "Screens this layout is offered on. Omit it for all of them; entries may be mixed. A screen without a single matching layout is left out of the flyout.",
-            "anyOf": [
-              {
-                "$ref": "#/definitions/monitorSelector"
-              },
-              {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                  "$ref": "#/definitions/monitorSelector"
-                }
-              }
-            ]
-          },
-          "zones": {
-            "type": "array",
-            "minItems": 1,
-            "description": "The tiles of this layout. Meant to tile the screen without overlapping.",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "left": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 99,
-                  "default": 0,
-                  "description": "Left edge in percent of the monitor."
-                },
-                "top": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 99,
-                  "default": 0,
-                  "description": "Top edge in percent of the monitor."
-                },
-                "width": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 100,
-                  "default": 50,
-                  "description": "Width in percent of the monitor."
-                },
-                "height": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 100,
-                  "default": 100,
-                  "description": "Height in percent of the monitor."
-                }
-              }
-            }
+        "$ref": "#/definitions/layout"
+      }
+    },
+    "touch": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Dragging a window into a zone with the finger: pick the window up by its title bar, rest the finger in the trigger field, and the zones unfold across the screen.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether dragging a window into a zone by finger is offered at all."
+        },
+        "alsoMouse": {
+          "type": "boolean",
+          "default": false,
+          "description": "React to a window dragged with the mouse as well. Off by default - with a mouse the flyout is the shorter way; useful for trying the overlay out on a machine without a touchscreen."
+        },
+        "dwellMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 250,
+          "description": "How long the finger must rest in the trigger field before the zones unfold. Too short and merely carrying a window across the middle of the screen opens them."
+        },
+        "trigger": {
+          "$ref": "#/definitions/zone",
+          "description": "Where the trigger field sits, in percent of the same reference area the zones use. It is only on screen while a window is actually being dragged."
+        },
+        "layouts": {
+          "type": "array",
+          "description": "Layouts offered while dragging. The first one matching the monitor is the one that shows - there is a single drop target, not a menu. Use \"monitors\" to give a tablet one arrangement upright and another on its side. A missing property falls back to the layouts of the flyout.",
+          "items": {
+            "$ref": "#/definitions/layout"
           }
         }
       }
