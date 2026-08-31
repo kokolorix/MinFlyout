@@ -40,7 +40,7 @@
     <Import Project="MinFlyout.props" />
   </ImportGroup>
   <PropertyGroup>
-    <TargetName>minflyout</TargetName>
+    <TargetName>MinFlyout</TargetName>
     <!-- F5 starts the EXE where the plugins folder is located. -->
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
