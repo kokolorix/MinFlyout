@@ -47,7 +47,7 @@ Palette MakePalette(bool dark) {
         p.hover      = RGB(234, 234, 234);
         p.separator  = RGB(222, 222, 222);
         p.miniBack   = RGB(255, 255, 255);
-        p.zone       = RGB(214, 214, 214);
+        p.zone       = RGB(180, 180, 180);
     }
     return p;
 }
