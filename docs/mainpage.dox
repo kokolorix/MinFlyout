@@ -75,7 +75,11 @@
  * - **Move is told from resize by the press, not by the event.**
  *   \c MOVESIZESTART brackets both, so the hit test has to happen at the moment
  *   of the press - before the window disappears into its loop and stops
- *   answering (\ref mfly::AppController::RememberPress).
+ *   answering (\ref mfly::AppController::RememberPress). The answer is read as a
+ *   blacklist rather than as a whitelist: asking for \c HTCAPTION looks
+ *   equivalent and excludes every application that draws its own title bar,
+ *   because such a window reports \c HTCLIENT there and moves itself. The sizing
+ *   codes are the closed list (\ref mfly::IsSizingHitTest).
  * - **One arithmetic for both windows.** Percent to pixels, the gap between
  *   tiles and the rule for overlapping zones live in OverlayGeometry.h, free of
  *   Windows dependencies and covered by \c tests/OverlayGeometryTest.cpp. The

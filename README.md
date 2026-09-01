@@ -186,7 +186,10 @@ application:
 * **Move is told from resize** by where the press landed. `MOVESIZESTART` brackets both,
   so the hit test happens at the moment of the press, before the window disappears into
   its loop and stops answering. That test costs one message, and only for a press that
-  could start a touch drag at all.
+  could start a touch drag at all. It is asked as a *blacklist* — is this one of the eight
+  border codes or the size box? — and not as the obvious `HTCAPTION` whitelist: an
+  application that draws its own title bar answers `HTCLIENT` there and starts the move
+  loop itself, and Explorer is exactly that application.
 * **The drop waits for the loop to end.** A window still finishing its move loop would
   overwrite anything positioned during it. `MOVESIZEEND` is the signal; if an app never
   sends one, a 250 ms grace after the finger lifts applies the zone anyway.
