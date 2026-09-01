@@ -137,6 +137,24 @@ bool IsOverMinimizeButton(HWND topLevel, POINT pt);
 LRESULT HitTestCode(HWND topLevel, POINT pt);
 
 /**
+ * \brief Reports whether a hit-test answer means "resize", not "move".
+ *
+ * \c EVENT_SYSTEM_MOVESIZESTART brackets both, so the touch drag has to tell
+ * them apart from where the press landed. Asking the other way round - "was it
+ * \c HTCAPTION?" - looks equivalent and is not: an application that draws its
+ * own title bar answers \c HTCLIENT there and moves the window itself, and
+ * Explorer is exactly that application. The sizing codes, on the other hand, are
+ * a short and closed list that no custom frame reinterprets.
+ *
+ * \param code Answer of \c WM_NCHITTEST.
+ * \return \c true for the eight border codes and the size box.
+ */
+inline bool IsSizingHitTest(LRESULT code) {
+    return code == HTSIZE ||  // == HTGROWBOX
+           (code >= HTLEFT && code <= HTBOTTOMRIGHT);
+}
+
+/**
  * \brief Reports windows that are skipped on principle.
  *
  * These are our own windows as well as shell windows (taskbar, desktop) and
