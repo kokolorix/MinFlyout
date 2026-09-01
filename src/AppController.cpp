@@ -392,7 +392,13 @@ void AppController::OnDragStart(HWND window) {
     // MOVESIZESTART brackets sizing just as much as moving. What separates the
     // two is where the press landed, and that was settled before the window
     // disappeared into its modal loop.
-    if (!pressOnCaption_) return;
+    //
+    // Asked as a blacklist, not as a whitelist: requiring HTCAPTION would be
+    // the obvious form and would exclude every application that draws its own
+    // title bar, because such a window answers HTCLIENT there and starts the
+    // move loop itself. Explorer is one of them. The sizing codes are the
+    // closed list, so everything else is a move.
+    if (IsSizingHitTest(pressHitTest_)) return;
     if (!IsMeasurable(window) || !IsResizable(window)) return;
 
     POINT pt{};
