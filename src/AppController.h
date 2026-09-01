@@ -144,9 +144,10 @@ private:
      *
      * Run from \ref HandleMouseDown, before anything else: at that moment the
      * pressed window has not entered its move loop yet, so \c WM_NCHITTEST
-     * still answers and says whether the press landed on a caption. When
-     * \ref WM_MFLY_DRAGSTART follows a moment later it is too late to ask -
-     * and \c EVENT_SYSTEM_MOVESIZESTART alone cannot tell a move from a resize.
+     * still answers. When \ref WM_MFLY_DRAGSTART follows a moment later it is
+     * too late to ask - and \c EVENT_SYSTEM_MOVESIZESTART alone cannot tell a
+     * move from a resize. What the answer has to mean is decided in
+     * \ref OnDragStart, see \ref IsSizingHitTest.
      *
      * Costs one message per press, and only for a press that could start a
      * touch drag at all: with the feature off, or a mouse press without
@@ -345,7 +346,7 @@ private:
     bool      dwellRunning_ = false;         ///< \ref kTimerDwell is running.
     bool      dropGraceRunning_ = false;     ///< \ref kTimerDrop is running.
     bool      pressWasContact_ = false;      ///< Last press came from pen or touch.
-    bool      pressOnCaption_ = false;       ///< Last press landed on a caption.
+    LRESULT   pressHitTest_ = HTNOWHERE;     ///< What the window answered at the last press.
 
     State state_ = State::Idle;       ///< Current state.
     bool  paused_ = false;            ///< Detection paused.

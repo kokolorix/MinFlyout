@@ -361,7 +361,7 @@ void AppController::HandleMouseDown() {
 // --- Touch drag ------------------------------------------------------------
 
 void AppController::RememberPress() {
-    pressOnCaption_ = false;
+    pressHitTest_ = HTNOWHERE;
 
     const TouchConfig& touch = ConfigStore::Instance().current().touch;
     if (!touch.enabled || paused_) return;
@@ -376,9 +376,10 @@ void AppController::RememberPress() {
     HWND root = under ? ::GetAncestor(under, GA_ROOT) : nullptr;
     if (!root || IsIgnoredWindow(root)) return;
 
-    // The only question here: is this the title bar? Everything else about the
-    // drag is decided later, on the same thread, when Windows announces it.
-    pressOnCaption_ = HitTestCode(root, pt) == HTCAPTION;
+    // Only the raw answer is kept. What it has to mean is decided in
+    // OnDragStart, where it is clear that a move or size loop actually started -
+    // here it is just the one moment at which the window still answers.
+    pressHitTest_ = HitTestCode(root, pt);
 }
 
 void AppController::OnDragStart(HWND window) {
