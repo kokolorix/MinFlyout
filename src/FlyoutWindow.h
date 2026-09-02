@@ -8,6 +8,7 @@
 #include "Common.h"
 #include "Config.h"
 #include "Monitors.h"
+#include "WindowSizer.h"
 
 namespace mfly {
 
@@ -32,6 +33,17 @@ struct MonitorRow {
 struct FlyoutContent {
     std::vector<MonitorRow> rows;   ///< Monitor rows to draw, in order.
     std::vector<Item>       items;  ///< Text items below the miniatures.
+
+    /**
+     * \brief Resize buttons drawn in a row above everything else.
+     *
+     * Empty leaves the toolbar out entirely. They sit at the top rather than
+     * among the text items because they are the one part of the flyout that
+     * does not close it: a window is nudged wider a step at a time, and a row
+     * of buttons that stays under the pointer is what that needs.
+     */
+    std::vector<ResizeCommand> tools;
+
     bool useWorkArea = true;        ///< Miniatures show the work area.
 
     /**
@@ -133,6 +145,9 @@ public:
     /// \return The clickable zones of the current layout.
     const std::vector<ZoneHotspot>& hotspots() const { return hotspots_; }
 
+    /// \return The resize buttons most recently passed to \ref Show.
+    const std::vector<ResizeCommand>& tools() const { return content_.tools; }
+
 private:
     /**
      * \brief Static window procedure; forwards to \ref HandleMessage.
@@ -202,6 +217,27 @@ private:
      */
     void SetHotZone(int index);
 
+    /**
+     * \brief Finds the resize button under a point.
+     * \param clientPt Point in client coordinates.
+     * \return Index into \ref toolRects_, or -1.
+     */
+    int HitTestTool(POINT clientPt) const;
+
+    /**
+     * \brief Sets the highlighted resize button.
+     *
+     * Repaints the two buttons involved and the caption line below them, which
+     * spells out what the hovered button does - there are no tooltips in a
+     * window that must never take the focus.
+     *
+     * \param index New index into \ref toolRects_, or -1 for none.
+     */
+    void SetHotTool(int index);
+
+    /// Draws the resize toolbar and the caption line below it.
+    void PaintToolbar(HDC dc);
+
     HWND   hwnd_ = nullptr;      ///< Own window.
     HWND   notify_ = nullptr;    ///< Recipient of the notifications (controller).
     HFONT  font_ = nullptr;      ///< Normal UI font.
@@ -210,6 +246,7 @@ private:
     UINT   dpi_ = 96;            ///< DPI the current layout was computed with.
     int    hotItem_ = -1;        ///< Index of the highlighted item, or -1.
     int    hotZone_ = -1;        ///< Index of the highlighted zone, or -1.
+    int    hotTool_ = -1;        ///< Index of the highlighted resize button, or -1.
     bool   tracking_ = false;    ///< \c TrackMouseEvent is running.
     bool   dark_ = false;        ///< Dark mode active.
 
@@ -220,6 +257,8 @@ private:
     std::vector<RECT> miniRects_;        ///< Miniature rectangles, row-major.
     std::vector<size_t> miniFirst_;      ///< First index in \ref miniRects_ per row.
     std::vector<size_t> zoneFirst_;      ///< First index in \ref hotspots_ per miniature.
+    std::vector<RECT> toolRects_;        ///< Resize buttons in client coordinates.
+    RECT   toolCaption_{};               ///< Line below the toolbar naming the hovered button.
     int    panelBottom_ = 0;             ///< Lower edge of the miniature area.
 };
 

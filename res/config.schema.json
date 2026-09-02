@@ -192,6 +192,55 @@
           }
         }
       }
+    },
+    "resize": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Resizing a window in steps. Windows can put a window into half a screen and it can maximize one vertically; between those there is nothing that means \"a bit wider\". These are four ways to say it - a modifier and a click on the border, the wheel over it, a hotkey, and a row of buttons at the top of the flyout - and they all move the edges by \"stepPx\" pixels.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether step resizing is offered at all. false switches off all four routes at once."
+        },
+        "stepPx": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 10,
+          "description": "How far one step moves an edge, in pixels."
+        },
+        "borderModifiers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ctrl plus a click on a window border grows it, Shift plus a click shrinks it. On the left or right border that changes the width and leaves the centre alone, on the top or bottom the height. Holding Alt as well moves only the edge that was clicked."
+        },
+        "wheel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Turning the wheel over a window border moves that one edge. No modifier; a corner moves both of its edges."
+        },
+        "followEdge": {
+          "type": "boolean",
+          "default": true,
+          "description": "Move the pointer along with the edge that has just moved, so the next click or notch lands on it without aiming again. It travels by however far the edge really went - shorter than a step where the screen stopped it, and not at all where the step ended in a maximize. Applies to the border and wheel gestures, not to the full-width double click."
+        },
+        "doubleClickMaximizes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Double clicking the left or right border stretches the window across the full width of the screen, and back - the counterpart of the vertical maximize Windows already does on the upper and lower border."
+        },
+        "hotkeys": {
+          "type": "boolean",
+          "default": true,
+          "description": "Register Ctrl+Alt+Left / Right to narrow and widen the foreground window, Ctrl+Alt+Up / Down to shorten and lengthen it, and Ctrl+Alt+Shift+Right to toggle the full screen width. A combination somebody else already owns simply stays unavailable."
+        },
+        "toolbar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Draw the row of resize buttons at the top of the flyout."
+        }
+      }
     }
   }
 }

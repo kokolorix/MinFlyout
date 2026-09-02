@@ -31,6 +31,11 @@ constexpr int kCornerRad    = 8;   ///< Corner radius of the window.
 constexpr int kMiniRad      = 4;   ///< Corner radius of a miniature.
 constexpr int kAnchorGap    = 4;   ///< Gap between button and flyout.
 constexpr int kMinMiniH     = 40;  ///< Lower bound for very wide monitors.
+constexpr int kToolSize     = 30;  ///< Edge length of one resize button.
+constexpr int kToolGap      = 3;   ///< Gap between two resize buttons.
+constexpr int kToolGlyphPad = 4;   ///< Padding between button edge and pictogram.
+constexpr int kToolCaptionH = 16;  ///< Line below the toolbar naming the hovered button.
+constexpr int kToolRad      = 4;   ///< Corner radius of a resize button.
 /** @} */
 
 /**
@@ -110,6 +115,8 @@ void FlyoutWindow::Measure(UINT dpi, SIZE& size) {
     miniRects_.clear();
     miniFirst_.clear();
     zoneFirst_.clear();
+    toolRects_.clear();
+    toolCaption_ = RECT{};
     itemRects_.assign(content_.items.size(), RECT{});
 
     const int pad = Scale(kPanelPad, dpi);
@@ -149,8 +156,34 @@ void FlyoutWindow::Measure(UINT dpi, SIZE& size) {
         textWidth += Scale(kCheckWidth + kItemPadX * 2, dpi);
     }
 
-    const int width = std::max(panelWidth, textWidth) + 2 * pad;
+    const int toolSize = Scale(kToolSize, dpi);
+    const int toolGap = Scale(kToolGap, dpi);
+    const int toolCount = static_cast<int>(content_.tools.size());
+    const int toolbarWidth =
+        toolCount > 0 ? toolCount * (toolSize + toolGap) - toolGap : 0;
+
+    const int width = std::max({panelWidth, textWidth, toolbarWidth}) + 2 * pad;
     int y = pad;
+
+    // The toolbar sits above everything else and is centred, so it reads as one
+    // strip rather than as a left-aligned first row of a list.
+    if (toolCount > 0) {
+        int x = (width - toolbarWidth) / 2;
+        for (int t = 0; t < toolCount; ++t) {
+            toolRects_.push_back(RECT{x, y, x + toolSize, y + toolSize});
+            x += toolSize + toolGap;
+        }
+        y += toolSize;
+
+        // Reserved whether or not a button is hovered, so the flyout does not
+        // change height under the pointer.
+        toolCaption_ = RECT{pad, y, width - pad, y + Scale(kToolCaptionH, dpi)};
+        y = toolCaption_.bottom;
+
+        if (!content_.rows.empty() || !content_.items.empty()) {
+            y += Scale(kSepHeight, dpi);
+        }
+    }
 
     for (size_t m = 0; m < content_.rows.size(); ++m) {
         const MonitorRow& row = content_.rows[m];
@@ -224,13 +257,14 @@ void FlyoutWindow::Show(FlyoutContent content, const RECT& anchor, UINT dpi, dou
     if (!hwnd_) return;
 
     content_ = std::move(content);
-    if (content_.items.empty() && !content_.hasLayouts()) return;
+    if (content_.items.empty() && !content_.hasLayouts() && content_.tools.empty()) return;
 
     const UINT baseDpi = dpi ? dpi : 96;
     dpi_ = ScaledDpi(baseDpi, scale);
     dark_ = SystemUsesDarkTheme();
     hotItem_ = -1;
     hotZone_ = -1;
+    hotTool_ = -1;
 
     MONITORINFO mi{};
     mi.cbSize = sizeof(mi);
@@ -301,7 +335,31 @@ void FlyoutWindow::Hide() {
     }
     hotItem_ = -1;
     hotZone_ = -1;
+    hotTool_ = -1;
     tracking_ = false;
+}
+
+int FlyoutWindow::HitTestTool(POINT pt) const {
+    for (size_t i = 0; i < toolRects_.size(); ++i) {
+        if (PtInRectPt(toolRects_[i], pt)) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+void FlyoutWindow::SetHotTool(int index) {
+    if (index == hotTool_) return;
+    const int previous = hotTool_;
+    hotTool_ = index;
+    for (int i : {previous, hotTool_}) {
+        if (i >= 0 && i < static_cast<int>(toolRects_.size())) {
+            ::InvalidateRect(hwnd_, &toolRects_[i], FALSE);
+        }
+    }
+    // The caption line spells out what the hovered button does; without it the
+    // pictograms would have to carry the whole explanation on their own.
+    if (toolCaption_.bottom > toolCaption_.top) {
+        ::InvalidateRect(hwnd_, &toolCaption_, TRUE);
+    }
 }
 
 int FlyoutWindow::HitTestItem(POINT pt) const {
@@ -442,6 +500,36 @@ void FlyoutWindow::PaintMonitorRow(HDC dc, size_t rowIndex) {
     }
 }
 
+void FlyoutWindow::PaintToolbar(HDC dc) {
+    if (toolRects_.empty()) return;
+
+    const Palette pal = MakePalette(dark_);
+    const int glyphPad = Scale(kToolGlyphPad, dpi_);
+
+    for (size_t i = 0; i < toolRects_.size() && i < content_.tools.size(); ++i) {
+        const RECT& button = toolRects_[i];
+        const bool hot = static_cast<int>(i) == hotTool_;
+
+        if (hot) FillRounded(dc, button, pal.hover, Scale(kToolRad, dpi_));
+        FrameRounded(dc, button, pal.border, Scale(kToolRad, dpi_));
+
+        const RECT glyph = InflateCopy(button, -glyphPad, -glyphPad);
+        DrawResizeGlyph(dc, glyph, content_.tools[i],
+                        hot ? pal.text : pal.textDim,
+                        hot ? pal.accent : pal.zone);
+    }
+
+    ::SelectObject(dc, fontSmall_);
+    ::SetTextColor(dc, pal.textDim);
+    const wchar_t* caption =
+        (hotTool_ >= 0 && hotTool_ < static_cast<int>(content_.tools.size()))
+            ? ResizeCommandName(content_.tools[hotTool_])
+            : L"";
+    RECT line = toolCaption_;
+    ::DrawTextW(dc, caption, -1, &line,
+                DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
 void FlyoutWindow::Paint(HDC target) {
     RECT client{};
     ::GetClientRect(hwnd_, &client);
@@ -458,6 +546,17 @@ void FlyoutWindow::Paint(HDC target) {
     FrameRounded(mem, client, pal.border, Scale(kCornerRad, dpi_));
 
     ::SetBkMode(mem, TRANSPARENT);
+
+    PaintToolbar(mem);
+
+    // Separator below the toolbar; it has one whenever something follows it.
+    if (!toolRects_.empty() && (!content_.rows.empty() || !content_.items.empty())) {
+        const int y = toolCaption_.bottom + Scale(kSepHeight, dpi_) / 2;
+        RECT line{Scale(kItemPadX, dpi_), y, client.right - Scale(kItemPadX, dpi_), y + 1};
+        HBRUSH sep = ::CreateSolidBrush(pal.separator);
+        ::FillRect(mem, &line, sep);
+        ::DeleteObject(sep);
+    }
 
     for (size_t m = 0; m < content_.rows.size(); ++m) {
         PaintMonitorRow(mem, m);
@@ -546,6 +645,7 @@ LRESULT FlyoutWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_MOUSEMOVE: {
         POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        SetHotTool(HitTestTool(pt));
         SetHotZone(HitTestZone(pt));
         SetHotItem(HitTestItem(pt));
         if (!tracking_) {
@@ -557,12 +657,20 @@ LRESULT FlyoutWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_MOUSELEAVE:
         tracking_ = false;
+        SetHotTool(-1);
         SetHotZone(-1);
         SetHotItem(-1);
         return 0;
 
     case WM_LBUTTONUP: {
         POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        // The toolbar comes first, and it is the one click that leaves the
+        // flyout open: a window is nudged wider a step at a time.
+        const int tool = HitTestTool(pt);
+        if (tool >= 0 && notify_) {
+            ::PostMessageW(notify_, WM_MFLY_TOOL, static_cast<WPARAM>(tool), 0);
+            return 0;
+        }
         const int zone = HitTestZone(pt);
         if (zone >= 0 && notify_) {
             ::PostMessageW(notify_, WM_MFLY_ZONE, static_cast<WPARAM>(zone), 0);

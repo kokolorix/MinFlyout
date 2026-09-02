@@ -46,7 +46,22 @@ enum : UINT {
     WM_MFLY_MOUSEUP   = WM_APP + 9,  ///< Mouse button released (posted by the HookThread).
     WM_MFLY_DRAGSTART = WM_APP + 10, ///< A foreign window entered its move/size loop (\c lParam = HWND).
     WM_MFLY_DRAGEND   = WM_APP + 11, ///< That loop ended (\c lParam = HWND).
+    WM_MFLY_WHEEL     = WM_APP + 12, ///< Wheel turned (\c wParam = +1 up, -1 down).
+    WM_MFLY_TOOL      = WM_APP + 13, ///< Flyout reports the chosen resize button (\c wParam = index).
 };
+
+/** \name Modifier keys of a mouse event
+ *
+ *  The low-level hook records which modifiers were held when a button went
+ *  down, rather than leaving the question to be asked later: by the time the
+ *  message is handled the user may well have let go of the key, and a Ctrl+click
+ *  would then arrive as a plain one.
+ *  @{ */
+constexpr UINT32 kModNone  = 0x0;  ///< No modifier was held.
+constexpr UINT32 kModCtrl  = 0x1;  ///< Ctrl was held.
+constexpr UINT32 kModShift = 0x2;  ///< Shift was held.
+constexpr UINT32 kModAlt   = 0x4;  ///< Alt was held.
+/** @} */
 
 /** \name Default values for timings (milliseconds)
  *  Can be changed through the configuration file.

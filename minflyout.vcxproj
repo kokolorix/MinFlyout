@@ -71,6 +71,7 @@
     <ClCompile Include="src\MonitorSelector.cpp" />
     <ClCompile Include="src\OverlayGeometry.cpp" />
     <ClCompile Include="src\Painting.cpp" />
+    <ClCompile Include="src\SettingsBackup.cpp" />
     <ClCompile Include="src\TrayStash.cpp" />
     <ClCompile Include="src\WindowSizer.cpp" />
     <ClCompile Include="src\ZoneOverlay.cpp" />
@@ -93,6 +94,7 @@
     <ClInclude Include="src\MonitorSelector.h" />
     <ClInclude Include="src\OverlayGeometry.h" />
     <ClInclude Include="src\Painting.h" />
+    <ClInclude Include="src\SettingsBackup.h" />
     <ClInclude Include="src\TrayStash.h" />
     <ClInclude Include="src\WindowSizer.h" />
     <ClInclude Include="src\ZoneOverlay.h" />

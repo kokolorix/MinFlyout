@@ -3,7 +3,9 @@
 A system-wide flyout above the **minimize** button – the counterpart to the Snap Layouts
 that Windows shows above the maximize button. Pure Win32/C++20, GDI rendering, no third-party
 libraries. The flyout previews the monitors with their configured zones; the layouts
-live in a JSONC file in the user profile and can be tied to particular screens.
+live in a JSONC file in the user profile and can be tied to particular screens. Beside
+the zones it can resize a window a step at a time — from the border, the wheel, a hotkey
+or its own toolbar.
 
 ## How it works
 
@@ -234,6 +236,151 @@ used instead, so an existing configuration gains the drag route without being to
 `alsoMouse` is the way to try all of this without a touchscreen: drag any window by its
 title bar with the mouse and the same field appears.
 
+### Nudging a window wider
+
+A zone is a destination. Windows can put a window into half a screen and it can maximize
+one vertically when its upper border is double clicked, and between those two there is
+nothing that means *a bit wider* — for that you have to pick the window up by a border
+three pixels wide and aim.
+
+So there is a step, `stepPx` pixels of it, and four ways to ask for one:
+
+```
+  Ctrl + click on a border ──┐
+  wheel over a border ───────┤
+  Ctrl+Alt+arrow ────────────┼──▶  move these edges by ±stepPx
+  a button in the flyout ────┘     clamp to the screen, or maximize if it fills it
+```
+
+**Ctrl or Shift and a click on the border.** Ctrl grows, Shift shrinks. On the left or
+right border that changes the width and leaves the centre where it is; on the top or
+bottom, the height. Hold **Alt** as well and only the edge you clicked moves, so the
+opposite side of the window stays put.
+
+The click is *not* swallowed. Deciding that it should be would mean asking the window
+under the cursor whether that is a border, and the low-level hook does nothing but post
+(see [How it works](#how-it-works)). A press on a border starts the window's own sizing
+loop instead; with no movement it ends where it began, and the step is applied about
+80 ms later — long enough for that loop to unwind, because a position set during it is
+discarded when it ends. A press that actually travelled further than `SM_CXDRAG` is left
+alone: that was a real resize drag, and adding a step on top would undo the aiming.
+
+**The wheel over a border.** No modifier, and it moves the one edge you are pointing at;
+a corner moves both of its edges.
+
+**The pointer travels with the edge.** Without that, a border gesture works exactly once:
+the edge moves ten pixels out from under the pointer, and the next click or notch lands on
+the client area and does nothing at all. So after every step the pointer is moved along —
+by however far the edge *really* went, which is shorter than a step where the screen
+stopped it, and not at all where the step ended in a maximize. It is skipped when the
+pointer has wandered more than sixteen pixels in the meantime, which is the difference
+between a hand resting on a mouse and a hand that has moved on. `"followEdge": false`
+switches it off.
+
+The wheel gets a second mechanism on top: its hit test is remembered for 400 ms and the
+remembered point is updated to wherever the pointer was just put. So a notch never has to
+ask a window that has not finished moving yet, and it can never end up resizing whatever
+window the departing edge has just uncovered.
+
+Clicking the same edge again before the previous step has landed does not lose it: the two
+are added together and applied as one, so three quick clicks move the edge three steps and
+the pointer follows the whole distance in one go.
+
+**Ctrl+Alt+arrow.** `Left` and `Right` narrow and widen the foreground window, `Up` and
+`Down` shorten and lengthen it, and `Ctrl+Alt+Shift+Right` toggles the full width. A
+combination somebody else already owns is written to the log and stays unavailable; the
+rest keep working.
+
+**The buttons at the top of the flyout.** Seven of them — larger, smaller, wider,
+narrower, taller, shorter, and full width — drawn rather than loaded, so they follow the
+DPI and the theme like everything else. This is the one click in the flyout that does
+**not** close it: nudging a window two hundred pixels wider means pressing the same
+button twenty times, and reopening the flyout for each of them is not an interface. The
+line below the row names whatever is hovered, because a window that must never take the
+focus cannot have tooltips.
+
+Whichever route, the same rules apply at the end of it:
+
+* What moves is the **visible** frame, the same rectangle a zone click positions — so a
+  window grown against a screen edge really touches it, shadow border and all.
+* Growing is **clamped** to the reference area (`useWorkArea` decides whether that
+  includes the taskbar). A window walks up to the edge and stops there.
+* A window that would fill the whole area afterwards is **maximized** properly, rather
+  than left as a normal window that happens to cover everything.
+* A maximized window cannot grow; shrinking one restores it, and the next step then works
+  on the restored frame.
+
+**Double click on the left or right border** stretches the window across the full width
+of the screen; double click again and it goes back where it was. That is the missing half
+of what Windows already does vertically. A low-level hook never sees `WM_LBUTTONDBLCLK` —
+that message is synthesised further along, inside the window's own queue — so the pair is
+reconstructed from two presses within `GetDoubleClickTime` and `SM_CXDOUBLECLK` of each
+other. The frame to go back to is remembered here rather than as a window property on the
+target: setting one would mean leaving something of ours behind in a process we do not
+control, and this application makes a point of not doing that. It is only used while the
+window still *is* at full width, so a window moved in between starts over.
+
+```jsonc
+  "resize": {
+    "enabled": true,
+    "stepPx": 10,
+    "borderModifiers": true,
+    "wheel": true,
+    "followEdge": true,
+    "doubleClickMaximizes": true,
+    "hotkeys": true,
+    "toolbar": true,
+  },
+```
+
+| Field | Meaning |
+|---|---|
+| `enabled` | whether step resizing is offered at all; `false` switches off all four routes |
+| `stepPx` | how far one step moves an edge, 1–200 pixels |
+| `borderModifiers` | Ctrl / Shift (+ Alt) and a click on a window border |
+| `wheel` | the wheel over a border moves that edge |
+| `followEdge` | move the pointer along with the edge, so the next step needs no aiming |
+| `doubleClickMaximizes` | double click on the left or right border toggles the full width |
+| `hotkeys` | register the Ctrl+Alt+arrow combinations |
+| `toolbar` | draw the button row at the top of the flyout |
+
+The two border routes cost one `WM_NCHITTEST` per mouse press — the same message the
+button detection sends, with the same `SMTO_ABORTIFHUNG` timeout. Turn both of them off
+and a press sends nothing at all.
+
+### Carrying the configuration between machines
+
+A machine keeps its configuration in `%APPDATA%`; a person keeps several machines. Two
+tray menu entries bridge that, and both appear **only where they can work**:
+
+| Entry | Appears when | Does |
+|---|---|---|
+| *Back up configuration as `<COMPUTERNAME>`.config.jsonc* | `P:\Sachen\Settings` exists | copies `config.jsonc` to `P:\Sachen\Settings\MinFlyout\<COMPUTERNAME>.config.jsonc` |
+| *Compare with the backup in Beyond Compare* | that folder exists **and** Beyond Compare 5 is installed | opens `P:\Sachen\Settings\MinFlyout` against `%APPDATA%\MinFlyout` |
+
+One file per machine, named after it, so a single folder holds them all without them ever
+colliding. The file is **copied**, not written afresh from the parsed values — half of a
+JSONC configuration is its comments, and a backup you cannot read is not much of one. An
+existing backup for this computer is overwritten; that is the point of it.
+
+The share is a mapped network drive, and `GetFileAttributesW` on one whose host has gone
+away can sit there for seconds. So the two questions — is the share mounted, is the
+comparer installed — are answered on a worker thread and only the *answer* is read while
+the menu is built. It is refreshed once at startup and again after each time the menu
+closes, which means a drive mounted while MinFlyout runs shows up the next time the menu
+is opened rather than needing a restart. Nothing ever waits for the drive.
+
+Beyond Compare is looked for generously and accepted strictly: the installer's registry
+key, the default install folder, and the shared `App Paths\BCompare.exe` entry, in that
+order. The first two name the version themselves; the last one does not, so a path found
+that way is only accepted once the executable's own version resource says 5. Without that
+check a machine with **Beyond Compare 4** installed would light up a menu entry for a
+program it does not have. `version.dll` is resolved at run time like every other optional
+dependency here.
+
+`P:\Sachen\Settings` is a single constant at the top of `src/SettingsBackup.h`, and
+everything else is derived from it.
+
 ### How the button is located
 
 `buttonDetection` chooses how MinFlyout finds the minimize button of a foreign window.
@@ -402,19 +549,20 @@ it off — worth knowing if `%APPDATA%` is redirected to a share that reports no
 | `src/CaptionGeometry.*` | where the caption buttons have to be; free of Windows dependencies |
 | `src/Diagnostics.*` | Ctrl+Alt+F12: the whole decision chain for one window, in plain text |
 | `src/DragWatcher.*` | WinEvent hook on the move/size loop of foreign windows, only posts |
-| `src/FlyoutWindow.*` | GDI popup: monitor miniatures, zone tiles, text items |
+| `src/FlyoutWindow.*` | GDI popup: resize toolbar, monitor miniatures, zone tiles, text items |
 | `src/ZoneOverlay.*` | the touch drop target: trigger field, then zones, input-transparent |
 | `src/OverlayGeometry.*` | percent to pixels, tile gaps, which zone a point hits; free of Windows dependencies |
-| `src/Painting.*` | palette and the rounded-rectangle primitives, shared by flyout and overlay |
+| `src/Painting.*` | palette, rounded-rectangle primitives and the resize pictograms |
 | `src/ItemRegistry.*` | provider registry, merging of the items |
 | `src/BuiltinProviders.cpp` | the two providers: core actions and window groups |
 | `src/Config.*` | loading/creating `config.jsonc`, schema, default values |
 | `src/ConfigWatcher.*` | watches the folder, debounces, posts one message per save |
+| `src/SettingsBackup.*` | the settings share and the Beyond Compare lookup, probed off the UI thread |
 | `src/Json.*` | JSONC parser (comments, trailing commas), no third-party library |
 | `src/Log.*` | `WRITE_*_LOG` macros, debugger output and optional log file |
 | `src/Monitors.*` | enumerates the monitors shown in the flyout |
 | `src/MonitorSelector.*` | which screens a layout applies to; free of Windows dependencies |
-| `src/WindowSizer.*` | zone + monitor → screen coordinates and back, DWM frame correction |
+| `src/WindowSizer.*` | zone + monitor → screen coordinates and back, step resizing, DWM frame correction |
 | `src/TrayStash.*` | “minimize to notification area” including restore |
 | `tests/JsonTest.cpp` | 40 checks for the parser, without a test framework |
 | `tests/SelectorTest.cpp` | 33 checks for the monitor selectors |
@@ -555,12 +703,20 @@ and dependency graphs.
 * Clicking the button itself minimizes as usual.
 * A window without a sizing border (`WS_THICKFRAME`) cannot be tiled; for those the miniature
   area is omitted and only the text items appear.
+* At the top a row of seven resize buttons — larger, smaller, wider, narrower, taller,
+  shorter, full width. They may be pressed repeatedly; the flyout stays open for them.
+* **Ctrl or Shift and a click on a window border** resizes it a step at a time, so does the
+  **wheel over a border**, and **double clicking the left or right border** stretches the
+  window across the full screen width and back. **Ctrl+Alt+arrow** does the same for the
+  foreground window. See [Nudging a window wider](#nudging-a-window-wider).
 * **Ctrl+Alt+F11** copies the zone of the active window as one ready-to-paste configuration
   line; **Ctrl+Alt+F12** writes the detection diagnosis for the window under the cursor.
 * Tray icon: **double click reloads the configuration** (the default action, shown in bold in
   the menu). Right click opens the menu: *Paused*, *Restore all stashed windows*,
   *Open configuration*, *Reload configuration*, *Copy zone of the active window*,
-  *Open diagnosis file*, *Exit*.
+  *Open diagnosis file*, *Exit* — plus *Back up configuration* and *Compare with the
+  backup in Beyond Compare* where the settings share and the comparer are there, see
+  [Carrying the configuration between machines](#carrying-the-configuration-between-machines).
 
 Items shipped alongside the configured sizes: Minimize · Minimize to notification area ·
 Always on top · Minimize all windows of this app · Minimize other windows · Show desktop.
@@ -578,7 +734,14 @@ With `showBuiltinItems: false` only the size list remains.
   places its buttons somewhere else stays out of reach. `"buttonDetection"` selects which way
   is used, and every failed detection lands in the log with the window class and the `HT` code
   the window returned.
-* **Non-resizable windows** (without `WS_THICKFRAME`) show the size items greyed out.
+* **Non-resizable windows** (without `WS_THICKFRAME`) show the size items greyed out, and
+  get neither the miniature area nor the resize toolbar.
+* **A modifier click on a border is applied after the fact**, not instead of the sizing
+  loop the press starts. Nothing of ours may swallow that click without asking the window
+  what is under the cursor, and asking is what the hook must not do — so the window enters
+  its loop, leaves it again on the button-up because nothing moved, and the step follows
+  80 ms later. On a window that reinterprets its own borders the press is a plain press
+  and nothing happens.
 * **Windows that are not per-monitor DPI aware rest on the estimate alone.** An older
   program — an MFC application, say — reports 96 dpi however large DWM draws it, answers
   `WM_NCHITTEST` over its caption buttons with `HTCAPTION` rather than `HTMINBUTTON`, and

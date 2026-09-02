@@ -96,6 +96,82 @@ struct TouchConfig {
 };
 
 /**
+ * \brief Resizing a window in steps, and the four ways to ask for it.
+ *
+ * Windows can move a window into half a screen and it can maximize one
+ * vertically, and between those two there is nothing: no way to say "a bit
+ * wider" without picking the window up by its border and aiming. These are the
+ * four routes to that - a modifier and a click on the border, the wheel over
+ * it, a hotkey, and a row of buttons at the top of the flyout - and they all
+ * end in the same \ref mfly::ResizeWindow.
+ *
+ * Each can be switched off on its own, because they occupy different real
+ * estate: the border routes take gestures away from the application under the
+ * cursor, the hotkeys take key combinations away from the whole desktop, and
+ * the toolbar only takes room in a window of ours.
+ */
+struct ResizeConfig {
+    /// Step resizing offered at all; \c false disables all four routes.
+    bool enabled = true;
+
+    /// Pixels one step moves an edge. Range 1 to 200.
+    int stepPx = 10;
+
+    /**
+     * \brief Ctrl or Shift plus a click on a window border resizes it.
+     *
+     * Ctrl grows, Shift shrinks; adding Alt moves only the edge that was
+     * clicked instead of both edges of that axis. The click is not swallowed -
+     * that would mean deciding inside the low-level hook whether the cursor is
+     * over a border, and the hook does nothing but post (see \ref mfly::HookThread).
+     * A press on a border starts the window's own sizing loop; without any
+     * movement it ends where it began, and the step is applied afterwards.
+     */
+    bool borderModifiers = true;
+
+    /// The wheel over a window border moves that edge, without any modifier.
+    bool wheel = true;
+
+    /**
+     * \brief Let the pointer travel with the edge it just moved.
+     *
+     * Without this the two border routes work exactly once: the edge moves ten
+     * pixels out from under the pointer, and the next click or notch lands on
+     * the client area and does nothing. So the pointer follows - by however far
+     * the edge really went, which is less than a step where the screen edge
+     * stopped it, and not at all where the step ended in a maximize.
+     *
+     * It applies to the step gestures only. The full-width double click puts
+     * the border at the edge of the screen, and dragging the pointer all the
+     * way there would be a bigger surprise than the re-aiming it saves.
+     */
+    bool followEdge = true;
+
+    /**
+     * \brief Double clicking the left or right border stretches the window
+     *        across the full screen width, and back.
+     *
+     * The counterpart of what Windows already does on the upper and lower
+     * border. Off by default it is not - a double click on a vertical border
+     * does nothing at all in Windows, so nothing is taken away.
+     */
+    bool doubleClickMaximizes = true;
+
+    /**
+     * \brief Register the Ctrl+Alt+arrow hotkeys.
+     *
+     * Left and right narrow and widen, up and down shorten and lengthen, and
+     * Ctrl+Alt+Shift+Left or +Right toggles the full width. They act on the
+     * foreground window. A combination somebody else already owns is reported
+     * in the log and simply stays unavailable.
+     */
+    bool hotkeys = true;
+
+    /// Draw the row of resize buttons at the top of the flyout.
+    bool toolbar = true;
+};
+
+/**
  * \brief The complete user configuration.
  */
 struct Config {
@@ -121,6 +197,7 @@ struct Config {
 
     std::vector<Layout> layouts;         ///< Configured layouts.
     TouchConfig touch;                   ///< Drag-to-zone by finger.
+    ResizeConfig resize;                 ///< Resizing a window in steps.
 
     /**
      * \brief How the minimize button is located.

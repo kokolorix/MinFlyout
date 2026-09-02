@@ -30,6 +30,7 @@ add_executable(minflyout WIN32
     src/TrayStash.cpp
     src/Config.cpp
     src/ConfigWatcher.cpp
+    src/SettingsBackup.cpp
     src/Json.cpp
     src/Log.cpp
     src/Monitors.cpp

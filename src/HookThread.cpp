@@ -30,8 +30,17 @@ std::atomic<unsigned long long> g_movesPosted{0};
 /// Extra information of the last button press - pen, touch or mouse.
 std::atomic<ULONG_PTR> g_lastDownExtra{0};
 
+/// Modifier keys held at the last button press, see \ref mfly::kModCtrl.
+std::atomic<UINT32> g_lastDownMods{kModNone};
+
+/// Screen position of the last button press, packed by \ref PackPoint.
+std::atomic<unsigned long long> g_lastDownPoint{0};
+
 /// Screen position of the last button release, x in the low half, y in the high.
 std::atomic<unsigned long long> g_lastUpPoint{0};
+
+/// Screen position of the last wheel notch, packed by \ref PackPoint.
+std::atomic<unsigned long long> g_lastWheelPoint{0};
 
 /**
  * \brief Packs a point into one atomically readable value.
@@ -55,6 +64,24 @@ unsigned long long PackPoint(POINT pt) {
 POINT UnpackPoint(unsigned long long value) {
     return POINT{static_cast<LONG>(static_cast<int>(value & 0xFFFFFFFFull)),
                  static_cast<LONG>(static_cast<int>((value >> 32) & 0xFFFFFFFFull))};
+}
+
+/**
+ * \brief Reads the modifier keys currently held down.
+ *
+ * \c GetAsyncKeyState reads state the window manager already keeps; it sends
+ * nothing and waits for nobody, so it is one of the few calls that may appear
+ * in a low-level hook callback.
+ *
+ * \return A combination of \ref mfly::kModCtrl, \ref mfly::kModShift and
+ *         \ref mfly::kModAlt.
+ */
+UINT32 CurrentModifiers() {
+    UINT32 mods = kModNone;
+    if (::GetAsyncKeyState(VK_CONTROL) & 0x8000) mods |= kModCtrl;
+    if (::GetAsyncKeyState(VK_SHIFT) & 0x8000)   mods |= kModShift;
+    if (::GetAsyncKeyState(VK_MENU) & 0x8000)    mods |= kModAlt;
+    return mods;
 }
 
 HHOOK g_mouseHook = nullptr;   // used on the hook thread only
@@ -86,7 +113,11 @@ LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 // input path.
                 if (auto* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam)) {
                     g_lastDownExtra.store(ms->dwExtraInfo, std::memory_order_relaxed);
+                    g_lastDownPoint.store(PackPoint(ms->pt), std::memory_order_relaxed);
                 }
+                // Recorded here rather than asked for later: by the time the
+                // message is handled the key may be up again.
+                g_lastDownMods.store(CurrentModifiers(), std::memory_order_relaxed);
                 ::PostMessageW(owner, WM_MFLY_MOUSEDOWN, 0, 0);
                 break;
             case WM_LBUTTONUP:
@@ -94,6 +125,20 @@ LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                     g_lastUpPoint.store(PackPoint(ms->pt), std::memory_order_relaxed);
                 }
                 ::PostMessageW(owner, WM_MFLY_MOUSEUP, 0, 0);
+                break;
+            case WM_MOUSEWHEEL:
+                // The notch is not swallowed. Deciding that it should be would
+                // mean asking the window under the cursor whether that is a
+                // border, and asking is exactly what this callback must not do.
+                // Over a border there is nothing to scroll anyway.
+                if (auto* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam)) {
+                    const short delta = static_cast<short>(HIWORD(ms->mouseData));
+                    if (delta != 0) {
+                        g_lastWheelPoint.store(PackPoint(ms->pt), std::memory_order_relaxed);
+                        ::PostMessageW(owner, WM_MFLY_WHEEL,
+                                       static_cast<WPARAM>(delta > 0 ? 1 : -1), 0);
+                    }
+                }
                 break;
             default:
                 break;
@@ -142,8 +187,20 @@ ULONG_PTR HookThread::LastDownExtraInfo() {
     return g_lastDownExtra.load(std::memory_order_relaxed);
 }
 
+UINT32 HookThread::LastDownModifiers() {
+    return g_lastDownMods.load(std::memory_order_relaxed);
+}
+
+POINT HookThread::LastDownPoint() {
+    return UnpackPoint(g_lastDownPoint.load(std::memory_order_relaxed));
+}
+
 POINT HookThread::LastUpPoint() {
     return UnpackPoint(g_lastUpPoint.load(std::memory_order_relaxed));
+}
+
+POINT HookThread::LastWheelPoint() {
+    return UnpackPoint(g_lastWheelPoint.load(std::memory_order_relaxed));
 }
 
 void HookThread::SetPaused(bool paused) {

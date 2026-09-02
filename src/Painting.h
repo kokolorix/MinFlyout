@@ -14,6 +14,7 @@
 #pragma once
 
 #include "Common.h"
+#include "WindowSizer.h"
 
 namespace mfly {
 
@@ -79,5 +80,24 @@ void FrameRounded(HDC dc, const RECT& r, COLORREF color, int radius, int width =
  *         only pass the result to \c DeleteObject, which ignores stock objects.
  */
 HFONT CreateUiFont(UINT dpi, bool bold, int delta);
+
+/**
+ * \brief Draws the pictogram of one resize command.
+ *
+ * Drawn rather than loaded, because an icon resource would have to exist in
+ * every size the DPI scaling asks for, and these are seven shapes made of
+ * rectangles and triangles. The vocabulary is the same in all of them: a thin
+ * outline is the screen, a filled rectangle is the window, and the little
+ * triangles say which way its edges are about to move - outward for growing,
+ * inward for shrinking.
+ *
+ * \param dc      Target device context.
+ * \param box     Square the glyph is drawn into.
+ * \param command Which pictogram.
+ * \param ink     Color of the outline and the arrows.
+ * \param fill    Color of the window rectangle.
+ */
+void DrawResizeGlyph(HDC dc, const RECT& box, ResizeCommand command,
+                     COLORREF ink, COLORREF fill);
 
 }  // namespace mfly

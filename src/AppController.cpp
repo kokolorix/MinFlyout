@@ -6,6 +6,7 @@
 #include "AppController.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 #include <shellapi.h>
 
@@ -14,6 +15,7 @@
 #include "ItemRegistry.h"
 #include "Log.h"
 #include "Monitors.h"
+#include "SettingsBackup.h"
 #include "TrayStash.h"
 #include "WindowSizer.h"
 #include "resource.h"
@@ -28,6 +30,8 @@ constexpr UINT kMenuOpenConfig = 102;///< Menu command: open configuration.
 constexpr UINT kMenuReloadConfig = 103;  ///< Menu command: reload configuration.
 constexpr UINT kMenuOpenDiagnosis = 105; ///< Menu command: open the diagnosis file.
 constexpr UINT kMenuCopyZone = 106;  ///< Menu command: copy the zone of the active window.
+constexpr UINT kMenuBackupConfig = 107;  ///< Menu command: copy the configuration to the share.
+constexpr UINT kMenuCompareConfig = 108; ///< Menu command: diff the share against this machine.
 constexpr UINT kMenuExit = 104;      ///< Menu command: exit.
 
 /// ID of the diagnosis hotkey (Ctrl+Alt+F12).
@@ -35,6 +39,62 @@ constexpr int kHotkeyDiagnose = 1;
 
 /// ID of the zone capture hotkey (Ctrl+Alt+F11).
 constexpr int kHotkeyCaptureZone = 2;
+
+/** \name Resize hotkeys
+ *
+ *  Consecutive IDs, because \ref AppController::resizeHotkeys_ indexes them by
+ *  <code>id - kHotkeyWiden</code>. The arrow keys are the obvious home for
+ *  "wider" and "taller"; Ctrl+Alt keeps them out of the way of the Windows snap
+ *  shortcuts, which live on the Windows key.
+ *  @{ */
+constexpr int kHotkeyWiden     = 3;  ///< Ctrl+Alt+Right.
+constexpr int kHotkeyNarrow    = 4;  ///< Ctrl+Alt+Left.
+constexpr int kHotkeyTaller    = 5;  ///< Ctrl+Alt+Down.
+constexpr int kHotkeyShorter   = 6;  ///< Ctrl+Alt+Up.
+constexpr int kHotkeyFullWidth = 7;  ///< Ctrl+Alt+Shift+Right.
+/** @} */
+
+/// The resize hotkeys in the order \ref AppController::resizeHotkeys_ stores them.
+struct HotkeySpec {
+    int id;             ///< One of the \c kHotkey* IDs above.
+    UINT modifiers;     ///< \c MOD_* combination.
+    UINT key;           ///< Virtual key code.
+    const wchar_t* name;///< How it is written in the log and the README.
+};
+
+/// Definition of every resize hotkey, in ID order.
+constexpr HotkeySpec kResizeHotkeys[] = {
+    {kHotkeyWiden,     MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,             VK_RIGHT, L"Ctrl+Alt+Right"},
+    {kHotkeyNarrow,    MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,             VK_LEFT,  L"Ctrl+Alt+Left"},
+    {kHotkeyTaller,    MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,             VK_DOWN,  L"Ctrl+Alt+Down"},
+    {kHotkeyShorter,   MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,             VK_UP,    L"Ctrl+Alt+Up"},
+    {kHotkeyFullWidth, MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_RIGHT, L"Ctrl+Alt+Shift+Right"},
+};
+
+/**
+ * \brief How long a step resize waits for the target's sizing loop to end.
+ *
+ * A press on a window border puts that window into a modal sizing loop, and a
+ * position set while it runs is discarded when it ends. Long enough for the
+ * loop to unwind after the button came up, short enough that the step still
+ * feels like part of the click.
+ */
+constexpr UINT kResizeDelayMs = 80;
+
+/// How long a wheel hit test stays valid for the same point.
+constexpr ULONGLONG kWheelCacheMs = 400;
+
+/**
+ * \brief How far the pointer may have drifted and still be taken along.
+ *
+ * The question this answers is "is the user still on this edge, or have they
+ * moved on?", and \c SM_CXDRAG - four pixels on a standard system - answers a
+ * different one. That threshold exists to tell a click from a drag within a few
+ * milliseconds; here a whole sizing loop and a short wait lie in between, and a
+ * hand resting on a mouse moves further than that without meaning anything by
+ * it. Deliberately leaving an edge is a movement of tens of pixels.
+ */
+constexpr LONG kFollowSlackPx = 16;
 
 /// Poll ticks with cursor movement but no hook report before reviving the hook.
 constexpr int kWatchdogStrikes = 3;
@@ -61,6 +121,34 @@ constexpr UINT kDropGraceMs = 250;
  */
 bool IsMeasurable(HWND window) {
     return window && ::IsWindow(window) && !::IsIconic(window) && !IsIgnoredWindow(window);
+}
+
+/**
+ * \brief Turns a border hit-test code into the edges a step should move.
+ *
+ * A click on the left or right border changes the width and leaves the centre
+ * where it is, which is what "a bit wider" usually means. \p singleEdge - the
+ * Alt variant, and what the wheel always does - moves only the edge that was
+ * actually pointed at, so the opposite side of the window stays put. A corner
+ * moves both of its edges either way.
+ *
+ * \param code       Answer of \c WM_NCHITTEST.
+ * \param singleEdge \c true moves only the edge under the pointer.
+ * \return The edges, or \ref SizeEdge::None if the code is not a border.
+ */
+SizeEdge EdgesForHitTest(LRESULT code, bool singleEdge) {
+    switch (code) {
+    case HTLEFT:        return singleEdge ? SizeEdge::Left   : SizeEdge::Horizontal;
+    case HTRIGHT:       return singleEdge ? SizeEdge::Right  : SizeEdge::Horizontal;
+    case HTTOP:         return singleEdge ? SizeEdge::Top    : SizeEdge::Vertical;
+    case HTBOTTOM:      return singleEdge ? SizeEdge::Bottom : SizeEdge::Vertical;
+    case HTTOPLEFT:     return SizeEdge::Top | SizeEdge::Left;
+    case HTTOPRIGHT:    return SizeEdge::Top | SizeEdge::Right;
+    case HTBOTTOMLEFT:  return SizeEdge::Bottom | SizeEdge::Left;
+    case HTBOTTOMRIGHT: return SizeEdge::Bottom | SizeEdge::Right;
+    case HTSIZE:        return SizeEdge::Bottom | SizeEdge::Right;  // the size box
+    default:            return SizeEdge::None;
+    }
 }
 
 }  // namespace
@@ -168,9 +256,47 @@ bool AppController::Init(HINSTANCE instance) {
                           log::dformat(L"error {}", ::GetLastError()));
     }
 
+    ApplyHotkeySetting();
+
+    // Asked now so the first tray menu already knows the answer, and asked off
+    // the UI thread so a share that has gone away costs nothing at startup.
+    RefreshBackupStatus();
+
     WRITE_INFO_LOG(log::dformat(L"MinFlyout started, build {}", BuildStamp()),
                    log::dformat(L"pid {}", ::GetCurrentProcessId()));
     return true;
+}
+
+void AppController::ApplyHotkeySetting() {
+    const ResizeConfig& resize = ConfigStore::Instance().current().resize;
+    const bool wanted = resize.enabled && resize.hotkeys;
+
+    if (!wanted) {
+        UnregisterResizeHotkeys();
+        return;
+    }
+
+    for (const HotkeySpec& spec : kResizeHotkeys) {
+        const size_t slot = static_cast<size_t>(spec.id - kHotkeyWiden);
+        if (resizeHotkeys_[slot]) continue;  // already ours
+
+        resizeHotkeys_[slot] =
+            ::RegisterHotKey(hwnd_, spec.id, spec.modifiers, spec.key) != FALSE;
+        if (!resizeHotkeys_[slot]) {
+            WRITE_WARNING_LOG(
+                log::dformat(L"{} is taken, that resize hotkey is unavailable", spec.name),
+                log::dformat(L"error {}", ::GetLastError()));
+        }
+    }
+}
+
+void AppController::UnregisterResizeHotkeys() {
+    for (const HotkeySpec& spec : kResizeHotkeys) {
+        const size_t slot = static_cast<size_t>(spec.id - kHotkeyWiden);
+        if (!resizeHotkeys_[slot]) continue;
+        ::UnregisterHotKey(hwnd_, spec.id);
+        resizeHotkeys_[slot] = false;
+    }
 }
 
 void AppController::Shutdown() {
@@ -183,6 +309,7 @@ void AppController::Shutdown() {
         ::UnregisterHotKey(hwnd_, kHotkeyCaptureZone);
         hotkeyZoneOk_ = false;
     }
+    UnregisterResizeHotkeys();
     EndDrag(/*applyZone=*/false);
     CloseFlyout(false);
     dragger_.Stop();
@@ -345,6 +472,7 @@ void AppController::LogDetectionMiss(HWND window, POINT pt) {
 void AppController::HandleMouseDown() {
     // First, because the window pressed has not entered its move loop yet.
     RememberPress();
+    HandleBorderPress();
 
     if (state_ == State::Idle) return;
 
@@ -362,24 +490,268 @@ void AppController::HandleMouseDown() {
 
 void AppController::RememberPress() {
     pressHitTest_ = HTNOWHERE;
-
-    const TouchConfig& touch = ConfigStore::Instance().current().touch;
-    if (!touch.enabled || paused_) return;
-
+    pressWindow_ = nullptr;
+    pressMods_ = HookThread::LastDownModifiers();
     pressWasContact_ = FromPenOrTouch(HookThread::LastDownExtraInfo());
-    if (!pressWasContact_ && !touch.alsoMouse) return;
+    if (paused_) return;
 
-    POINT pt{};
-    if (!::GetCursorPos(&pt)) return;
+    // Two features want to know what was pressed, and both want it now: the
+    // touch drag, and the border gestures of the step resize. Whether the one
+    // message is worth sending is decided by whether anybody is listening -
+    // with both switched off, a press costs nothing at all.
+    const Config& config = ConfigStore::Instance().current();
+    const bool touchWants =
+        config.touch.enabled && (pressWasContact_ || config.touch.alsoMouse);
+    const bool resizeWants =
+        config.resize.enabled &&
+        (config.resize.borderModifiers || config.resize.doubleClickMaximizes);
+    if (!touchWants && !resizeWants) return;
+
+    // Where the hook saw the press, not where the pointer happens to be now.
+    POINT pt = HookThread::LastDownPoint();
+    if (pt.x == 0 && pt.y == 0 && !::GetCursorPos(&pt)) return;
 
     HWND under = ::WindowFromPoint(pt);
     HWND root = under ? ::GetAncestor(under, GA_ROOT) : nullptr;
     if (!root || IsIgnoredWindow(root)) return;
 
     // Only the raw answer is kept. What it has to mean is decided in
-    // OnDragStart, where it is clear that a move or size loop actually started -
-    // here it is just the one moment at which the window still answers.
+    // OnDragStart, where it is clear that a move or size loop actually started,
+    // and in HandleBorderPress / HandleBorderRelease - here it is just the one
+    // moment at which the window still answers.
+    pressWindow_ = root;
     pressHitTest_ = HitTestCode(root, pt);
+}
+
+// --- Step resizing ---------------------------------------------------------
+
+void AppController::HandleBorderPress() {
+    const bool wasDouble = borderDoubleClick_;
+    borderDoubleClick_ = false;
+
+    const ResizeConfig& resize = ConfigStore::Instance().current().resize;
+    if (paused_ || !resize.enabled || !resize.doubleClickMaximizes) return;
+
+    const POINT pt = HookThread::LastDownPoint();
+    const ULONGLONG now = ::GetTickCount64();
+
+    const bool inTime = !wasDouble &&                     // a third click starts over
+                        lastClickTick_ != 0 &&
+                        now - lastClickTick_ <= ::GetDoubleClickTime();
+    const bool inPlace =
+        std::abs(pt.x - lastClickPt_.x) <= ::GetSystemMetrics(SM_CXDOUBLECLK) / 2 &&
+        std::abs(pt.y - lastClickPt_.y) <= ::GetSystemMetrics(SM_CYDOUBLECLK) / 2;
+
+    lastClickPt_ = pt;
+    lastClickTick_ = now;
+    if (!inTime || !inPlace) return;
+
+    // Modifiers mean the other border gesture; a double click is the plain one.
+    if (pressMods_ != kModNone) return;
+    if (pressHitTest_ != HTLEFT && pressHitTest_ != HTRIGHT) return;
+    if (!pressWindow_) return;
+
+    borderDoubleClick_ = true;
+    QueueMaximizeHorizontal(pressWindow_);
+}
+
+void AppController::HandleBorderRelease() {
+    // The double click already claimed this press; its release means nothing.
+    if (borderDoubleClick_) return;
+
+    const Config& config = ConfigStore::Instance().current();
+    const ResizeConfig& resize = config.resize;
+    if (paused_ || !resize.enabled || !resize.borderModifiers) return;
+    if (!pressWindow_ || !::IsWindow(pressWindow_)) return;
+
+    // Exactly one of the two: Ctrl grows, Shift shrinks, neither or both means
+    // this was not meant for us.
+    const bool grow = (pressMods_ & kModCtrl) != 0;
+    const bool shrink = (pressMods_ & kModShift) != 0;
+    if (grow == shrink) return;
+
+    const SizeEdge edges =
+        EdgesForHitTest(pressHitTest_, (pressMods_ & kModAlt) != 0);
+    if (edges == SizeEdge::None) return;
+
+    // A press that travelled was a real resize drag. The window is already
+    // where the user dragged it to, and adding a step on top of that would
+    // undo the aiming they just did.
+    const POINT down = HookThread::LastDownPoint();
+    const POINT up = HookThread::LastUpPoint();
+    if (std::abs(up.x - down.x) > ::GetSystemMetrics(SM_CXDRAG) ||
+        std::abs(up.y - down.y) > ::GetSystemMetrics(SM_CYDRAG)) {
+        return;
+    }
+
+    QueueResize(pressWindow_, grow ? resize.stepPx : -resize.stepPx, edges,
+                pressHitTest_, down);
+}
+
+bool AppController::FollowEdge(POINT from, LRESULT hitTest, const RECT& edgeShift,
+                               POINT& moved) {
+    if (!ConfigStore::Instance().current().resize.followEdge) return false;
+
+    const POINT shift = CursorShiftForHitTest(hitTest, edgeShift);
+    if (shift.x == 0 && shift.y == 0) return false;
+
+    // Only if the pointer is still about where the gesture started. Between the
+    // click and this moment lie the sizing loop and a short wait, and a user who
+    // has meanwhile moved on must not have the pointer yanked back.
+    POINT now{};
+    if (!::GetCursorPos(&now)) return false;
+    if (std::abs(now.x - from.x) > kFollowSlackPx ||
+        std::abs(now.y - from.y) > kFollowSlackPx) {
+        return false;
+    }
+
+    // Measured from where the pointer *is*, not from where the gesture began:
+    // a hand that drifted two pixels keeps those two pixels instead of being
+    // snapped back to a position it has already left.
+    moved = POINT{now.x + shift.x, now.y + shift.y};
+    if (!::SetCursorPos(moved.x, moved.y)) return false;
+
+    WRITE_DEBUG_LOG(log::dformat(L"Pointer followed the edge by {},{}", shift.x, shift.y));
+    return true;
+}
+
+void AppController::HandleWheel(int direction) {
+    const Config& config = ConfigStore::Instance().current();
+    const ResizeConfig& resize = config.resize;
+    if (paused_ || !resize.enabled || !resize.wheel) return;
+    if (dragState_ != DragState::None) return;
+
+    const POINT pt = HookThread::LastWheelPoint();
+    const ULONGLONG now = ::GetTickCount64();
+
+    // The edge that is being moved travels out from under the pointer, so
+    // asking again a notch later would answer "client area" - or worse, answer
+    // for whatever window has just been uncovered - and the gesture would end
+    // after a single notch or continue on the wrong window. So both the answer
+    // and the window it came from are kept for as long as the pointer stays
+    // put: scrolling on keeps moving the edge that was first pointed at.
+    const bool reuse = wheelWindow_ && ::IsWindow(wheelWindow_) &&
+                       wheelHit_ != HTNOWHERE &&
+                       pt.x == wheelPt_.x && pt.y == wheelPt_.y &&
+                       now - wheelTick_ <= kWheelCacheMs;
+
+    if (!reuse) {
+        wheelWindow_ = nullptr;
+        wheelHit_ = HTNOWHERE;
+        wheelPt_ = pt;
+
+        HWND under = ::WindowFromPoint(pt);
+        HWND root = under ? ::GetAncestor(under, GA_ROOT) : nullptr;
+        if (!root || IsIgnoredWindow(root)) return;
+
+        wheelHit_ = HitTestCode(root, pt);
+        wheelWindow_ = root;
+    }
+    wheelTick_ = now;
+
+    const SizeEdge edges = EdgesForHitTest(wheelHit_, /*singleEdge=*/true);
+    if (edges == SizeEdge::None) return;
+
+    // No sizing loop is running for a wheel notch, so this needs no delay.
+    RECT edgeShift{};
+    if (!ResizeWindow(wheelWindow_, direction > 0 ? resize.stepPx : -resize.stepPx,
+                      edges, config.useWorkArea, &edgeShift)) {
+        return;
+    }
+
+    // The pointer rides the edge. Moving it invalidates the cache above, which
+    // is keyed on the point - so the new position is written back and the next
+    // notch still finds the answer instead of asking a window that may not have
+    // finished moving yet.
+    POINT moved{};
+    if (FollowEdge(pt, wheelHit_, edgeShift, moved)) wheelPt_ = moved;
+}
+
+void AppController::QueueResize(HWND window, int step, SizeEdge edges,
+                                LRESULT hitTest, POINT origin) {
+    // A second click on the same edge before the first has landed adds to it
+    // instead of replacing it. Clicking three times quickly has to move the edge
+    // three steps - and one write of the window position for the lot of them
+    // also means the pointer follows the whole distance in one go, rather than
+    // chasing an edge that is still moving.
+    if (resizePending_ && !pendingResize_.maximizeH &&
+        pendingResize_.window == window && pendingResize_.edges == edges &&
+        pendingResize_.hitTest == hitTest &&
+        (pendingResize_.step > 0) == (step > 0)) {
+        pendingResize_.step += step;
+        return;
+    }
+
+    // Anything else - another window, the other direction, a different edge -
+    // is a separate gesture and must not swallow the one already waiting.
+    if (resizePending_) RunPendingResize();
+
+    pendingResize_ = PendingResize{window, step, edges, false, hitTest, origin};
+    ::SetTimer(hwnd_, kTimerResize, kResizeDelayMs, nullptr);
+    resizePending_ = true;
+}
+
+void AppController::QueueMaximizeHorizontal(HWND window) {
+    if (resizePending_) RunPendingResize();
+
+    pendingResize_ = PendingResize{window, 0, SizeEdge::None, true, HTNOWHERE, POINT{}};
+    ::SetTimer(hwnd_, kTimerResize, kResizeDelayMs, nullptr);
+    resizePending_ = true;
+}
+
+void AppController::RunPendingResize() {
+    if (resizePending_) {
+        ::KillTimer(hwnd_, kTimerResize);
+        resizePending_ = false;
+    }
+
+    const PendingResize job = pendingResize_;
+    pendingResize_ = PendingResize{};
+    if (!job.window || !::IsWindow(job.window)) return;
+
+    const bool useWorkArea = ConfigStore::Instance().current().useWorkArea;
+    const log::Stopwatch actionTime;
+    RECT edgeShift{};
+    const bool changed =
+        job.maximizeH ? MaximizeHorizontally(job.window, useWorkArea)
+                      : ResizeWindow(job.window, job.step, job.edges, useWorkArea, &edgeShift);
+
+    // The pointer follows the edge, so the next click needs no aiming. Not for
+    // the full-width toggle: that one puts the border at the edge of the screen,
+    // and carrying the pointer all the way there would surprise more than the
+    // re-aiming it saves.
+    if (changed && !job.maximizeH) {
+        POINT moved{};
+        FollowEdge(job.origin, job.hitTest, edgeShift, moved);
+    }
+
+    if (changed) {
+        WRITE_INFO_LOG(job.maximizeH
+                           ? std::wstring(L"Border gesture: full width")
+                           : log::dformat(L"Border gesture: {:+} px on edges {:#x}",
+                                          job.step, static_cast<unsigned>(job.edges)),
+                       log::Describe(job.window), actionTime.ElapsedMs());
+    }
+}
+
+void AppController::InvokeTool(size_t index) {
+    if (state_ != State::Open) return;
+    const std::vector<ResizeCommand>& tools = flyout_.tools();
+    if (index >= tools.size()) return;
+
+    const ResizeCommand command = tools[index];
+    const Config& config = ConfigStore::Instance().current();
+
+    // The flyout deliberately stays open. Every other click in it is a
+    // destination - one zone, one item, done - but a step is a step: nudging a
+    // window two hundred pixels wider means pressing the same button twenty
+    // times, and reopening the flyout for each of them is not an interface.
+    const log::Stopwatch actionTime;
+    const bool changed = ApplyResizeCommand(ctx_.targetWindow, command,
+                                            config.resize.stepPx, config.useWorkArea);
+    WRITE_INFO_LOG(log::dformat(L"Resize button: {}{}", ResizeCommandName(command),
+                                changed ? L"" : L" (no change)"),
+                   log::Describe(ctx_.targetWindow), actionTime.ElapsedMs());
 }
 
 void AppController::OnDragStart(HWND window) {
@@ -704,6 +1076,12 @@ void AppController::OpenFlyout() {
     const size_t current = IndexOfMonitorFor(monitors, hit_.window);
     size_t rowOfCurrent = monitors.size();  // "not among the rows"
 
+    // Same condition, same reason: without a sizing border there is nothing for
+    // the resize buttons to do either.
+    if (config.resize.enabled && config.resize.toolbar && IsResizable(hit_.window)) {
+        content.tools.assign(std::begin(kResizeCommands), std::end(kResizeCommands));
+    }
+
     if (IsResizable(hit_.window)) {
         for (size_t m = 0; m < monitors.size(); ++m) {
             // Which screens to offer: all of them, or only the one the window
@@ -724,7 +1102,7 @@ void AppController::OpenFlyout() {
     ItemList list = Registry::Instance().Collect(ctx_);
     content.items = std::move(list.items());
 
-    if (content.items.empty() && content.rows.empty()) {
+    if (content.items.empty() && content.rows.empty() && content.tools.empty()) {
         WRITE_WARNING_LOG(L"Nothing to show", log::Describe(hit_.window));
         state_ = State::Idle;
         return;
@@ -842,6 +1220,7 @@ void AppController::ReloadConfig() {
     ParseProbeMode(config.buttonDetection, probeMode_);
     traceDetection_ = config.traceDetection;
     ApplyWatchSetting();
+    ApplyHotkeySetting();
 
     if (ok) {
         wchar_t text[128] = {};
@@ -903,6 +1282,25 @@ void AppController::ShowTrayMenu() {
     ::AppendMenuW(menu, MF_STRING, kMenuReloadConfig, L"Reload configuration");
     ::AppendMenuW(menu, MF_STRING, kMenuCopyZone,
                   L"Copy zone of the active window\t Ctrl+Alt+F11");
+
+    // Only where they can work. The answer comes from the last probe and is
+    // never asked for here - the share is a network drive, and a menu that
+    // waits for one to answer is a menu that hangs. See SettingsBackup.h.
+    const BackupAvailability backup = BackupStatus();
+    if (backup.folder) {
+        ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+        const std::wstring file = BackupFileName();
+        std::wstring label = L"Back up configuration";
+        if (!file.empty()) label += L" as " + file;
+        ::AppendMenuW(menu, MF_STRING, kMenuBackupConfig, label.c_str());
+
+        if (backup.comparer) {
+            ::AppendMenuW(menu, MF_STRING, kMenuCompareConfig,
+                          L"Compare with the backup in Beyond Compare");
+        }
+    }
+
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     ::AppendMenuW(menu, MF_STRING, kMenuOpenDiagnosis,
                   L"Open diagnosis file\t Ctrl+Alt+F12 writes it");
@@ -918,6 +1316,28 @@ void AppController::ShowTrayMenu() {
     ::TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, pt.x, pt.y, 0, hwnd_, nullptr);
     ::PostMessageW(hwnd_, WM_NULL, 0, 0);
     ::DestroyMenu(menu);
+
+    // For the next time the menu is opened. A share mounted while the
+    // application runs therefore shows up on the second open rather than
+    // needing a restart, and nobody waits for the drive to answer.
+    RefreshBackupStatus();
+}
+
+void AppController::BackupConfiguration() {
+    std::wstring target;
+    std::wstring error;
+    if (SaveConfigurationBackup(target, error)) {
+        ShowTrayBalloon(L"Configuration backed up", target, false);
+    } else {
+        ShowTrayBalloon(L"Backup failed", error, true);
+    }
+}
+
+void AppController::CompareConfiguration() {
+    std::wstring error;
+    if (!CompareConfigurationFolders(error)) {
+        ShowTrayBalloon(L"Comparison failed", error, true);
+    }
 }
 
 // --- Window procedure ------------------------------------------------------
@@ -953,6 +1373,11 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             ::SetTimer(hwnd_, kTimerDrop, kDropGraceMs, nullptr);
             dropGraceRunning_ = true;
         }
+        HandleBorderRelease();
+        return 0;
+
+    case WM_MFLY_WHEEL:
+        HandleWheel(static_cast<int>(static_cast<INT_PTR>(wParam)));
         return 0;
 
     case WM_MFLY_DRAGSTART:
@@ -982,6 +1407,10 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         InvokeZone(static_cast<size_t>(wParam));
         return 0;
 
+    case WM_MFLY_TOOL:
+        InvokeTool(static_cast<size_t>(wParam));
+        return 0;
+
     case WM_MFLY_CLOSED:
         CloseFlyout(false);
         return 0;
@@ -1007,13 +1436,36 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         return 0;
 
-    case WM_HOTKEY:
+    case WM_HOTKEY: {
+        // The resize hotkeys act on the foreground window: it is the one the
+        // user is working in, and unlike the flyout they are not aimed at
+        // anything with the pointer.
+        const Config& config = ConfigStore::Instance().current();
+        const int step = config.resize.stepPx;
+        HWND front = ::GetForegroundWindow();
+
         switch (static_cast<int>(wParam)) {
         case kHotkeyDiagnose:    WriteDiagnosis(); return 0;
-        case kHotkeyCaptureZone: CaptureZone(::GetForegroundWindow()); return 0;
+        case kHotkeyCaptureZone: CaptureZone(front); return 0;
+        case kHotkeyWiden:
+            ResizeWindow(front, step, SizeEdge::Horizontal, config.useWorkArea);
+            return 0;
+        case kHotkeyNarrow:
+            ResizeWindow(front, -step, SizeEdge::Horizontal, config.useWorkArea);
+            return 0;
+        case kHotkeyTaller:
+            ResizeWindow(front, step, SizeEdge::Vertical, config.useWorkArea);
+            return 0;
+        case kHotkeyShorter:
+            ResizeWindow(front, -step, SizeEdge::Vertical, config.useWorkArea);
+            return 0;
+        case kHotkeyFullWidth:
+            MaximizeHorizontally(front, config.useWorkArea);
+            return 0;
         default: break;
         }
         return 0;
+    }
 
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
@@ -1023,6 +1475,8 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case kMenuReloadConfig: ReloadConfig(); return 0;
         case kMenuOpenDiagnosis: OpenDiagnosisFile(); return 0;
         case kMenuCopyZone:     CaptureZone(menuTarget_); return 0;
+        case kMenuBackupConfig: BackupConfiguration(); return 0;
+        case kMenuCompareConfig: CompareConfiguration(); return 0;
         case kMenuExit:         ::PostQuitMessage(0); return 0;
         default: break;
         }
@@ -1051,6 +1505,11 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
 
+        case kTimerResize:
+            // The sizing loop the press started has had its moment to unwind.
+            RunPendingResize();
+            return 0;
+
         case kTimerDrop:
             // MOVESIZEEND did not come. The button is up, so the move loop is
             // over one way or another - apply what the finger was over.
@@ -1062,6 +1521,7 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case kTimerPoll:
             TrayStash::Instance().DropDeadWindows();
+            ForgetDeadResizeState();
             CheckHookAlive();
             if (state_ == State::Open &&
                 (!::IsWindow(hit_.window) || ::IsIconic(hit_.window))) {

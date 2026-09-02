@@ -84,6 +84,9 @@
     <ClCompile Include="src\WindowSizer.cpp">
       <Filter>Configuration</Filter>
     </ClCompile>
+    <ClCompile Include="src\SettingsBackup.cpp">
+      <Filter>Configuration</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\AppController.h">
@@ -144,6 +147,9 @@
       <Filter>Configuration</Filter>
     </ClInclude>
     <ClInclude Include="src\WindowSizer.h">
+      <Filter>Configuration</Filter>
+    </ClInclude>
+    <ClInclude Include="src\SettingsBackup.h">
       <Filter>Configuration</Filter>
     </ClInclude>
   </ItemGroup>

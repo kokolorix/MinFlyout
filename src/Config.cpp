@@ -178,6 +178,42 @@ constexpr const char* kTemplate =
     "      },\n"
     "    ],\n"
     "  },\n"
+    "\n"
+    "  // Resizing a window in steps.\n"
+    "  //\n"
+    "  // Windows can put a window into half a screen and it can maximize one\n"
+    "  // vertically; between those there is nothing that means \"a bit wider\".\n"
+    "  // These are four ways to say it, and they all move the edges by\n"
+    "  // \"stepPx\" pixels:\n"
+    "  //\n"
+    "  //   border   Ctrl+click on a window border grows it, Shift+click shrinks\n"
+    "  //            it. On the left or right border that changes the width and\n"
+    "  //            leaves the centre alone, on the top or bottom the height.\n"
+    "  //            Hold Alt as well and only the edge you clicked moves.\n"
+    "  //   wheel    Turn the wheel over a border and that one edge follows it.\n"
+    "  //   hotkeys  Ctrl+Alt+Left / Right narrow and widen the foreground\n"
+    "  //            window, Ctrl+Alt+Up / Down shorten and lengthen it, and\n"
+    "  //            Ctrl+Alt+Shift+Right toggles the full screen width.\n"
+    "  //   toolbar  The row of buttons at the top of the flyout.\n"
+    "  //\n"
+    "  // After a step from the border or the wheel the pointer travels along\n"
+    "  // with the edge, so the next click or notch lands on it without aiming\n"
+    "  // again - by however far the edge really went, which is less than a step\n"
+    "  // where the screen stopped it. \"followEdge\": false leaves it alone.\n"
+    "  //\n"
+    "  // Double clicking the left or right border stretches the window across\n"
+    "  // the full width of the screen and back - the counterpart of what\n"
+    "  // Windows already does on the upper and lower border.\n"
+    "  \"resize\": {\n"
+    "    \"enabled\": true,\n"
+    "    \"stepPx\": 10,\n"
+    "    \"borderModifiers\": true,\n"
+    "    \"wheel\": true,\n"
+    "    \"followEdge\": true,\n"
+    "    \"doubleClickMaximizes\": true,\n"
+    "    \"hotkeys\": true,\n"
+    "    \"toolbar\": true,\n"
+    "  },\n"
     "}\n";
 
 /**
@@ -408,6 +444,36 @@ bool ReadTouch(const json::Value& root, Config& out) {
     return true;
 }
 
+/**
+ * \brief Reads the \c "resize" section.
+ *
+ * A missing section leaves the defaults in place, so a configuration written
+ * before step resizing existed gains it without being touched.
+ *
+ * \param[in]  root The configuration object.
+ * \param[out] out  Target configuration.
+ * \return \c false with Config::error set if the section is malformed.
+ */
+bool ReadResize(const json::Value& root, Config& out) {
+    const json::Value* resize = root.find(L"resize");
+    if (!resize) return true;
+    if (!resize->is(json::Value::Type::Object)) {
+        out.error = L"\"resize\" must be an object.";
+        return false;
+    }
+
+    out.resize.enabled = resize->boolean(L"enabled", true);
+    out.resize.stepPx = static_cast<int>(
+        ClampPercent(resize->number(L"stepPx", 10), 1, 200));
+    out.resize.borderModifiers = resize->boolean(L"borderModifiers", true);
+    out.resize.wheel = resize->boolean(L"wheel", true);
+    out.resize.followEdge = resize->boolean(L"followEdge", true);
+    out.resize.doubleClickMaximizes = resize->boolean(L"doubleClickMaximizes", true);
+    out.resize.hotkeys = resize->boolean(L"hotkeys", true);
+    out.resize.toolbar = resize->boolean(L"toolbar", true);
+    return true;
+}
+
 }  // namespace
 
 std::vector<Layout> DefaultLayouts() {
@@ -517,6 +583,7 @@ bool ConfigStore::ParseInto(const std::wstring& text, Config& out) {
     }
 
     if (!ReadTouch(root, out)) return false;
+    if (!ReadResize(root, out)) return false;
 
     const json::Value* layouts = root.find(L"layouts");
     if (!layouts) return true;  // no section: keep the defaults

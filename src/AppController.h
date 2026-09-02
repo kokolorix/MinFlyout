@@ -14,6 +14,7 @@
 #include "DragWatcher.h"
 #include "FlyoutWindow.h"
 #include "HookThread.h"
+#include "WindowSizer.h"
 #include "ZoneOverlay.h"
 
 namespace mfly {
@@ -106,6 +107,25 @@ private:
         kTimerPoll  = 3,  ///< Periodic cleanup check.
         kTimerDwell = 4,  ///< Rest in the touch trigger field before the zones unfold.
         kTimerDrop  = 5,  ///< Grace after the finger lifted, waiting for the move loop to end.
+        kTimerResize = 6, ///< Short wait before a step resize, see \ref QueueResize.
+    };
+
+    /**
+     * \brief A step resize waiting for the target window's sizing loop to end.
+     *
+     * Either a step (\ref step and \ref edges) or the full-width toggle
+     * (\ref maximizeH); the two never apply at once.
+     */
+    struct PendingResize {
+        HWND     window = nullptr;        ///< Window to resize.
+        int      step = 0;                ///< Pixels per edge; negative shrinks.
+        SizeEdge edges = SizeEdge::None;  ///< Which edges move.
+        bool     maximizeH = false;       ///< Full-width toggle instead of a step.
+
+        /// Border the press landed on; decides which way the pointer follows.
+        LRESULT  hitTest = HTNOWHERE;
+        /// Where that press was, so the pointer is only moved if it stayed there.
+        POINT    origin{};
     };
 
     /**
@@ -188,6 +208,110 @@ private:
      *        one; \c false withdraws the overlay and leaves the window alone.
      */
     void EndDrag(bool applyZone);
+
+    // --- Step resizing -----------------------------------------------------
+
+    /**
+     * \brief Recognises a double click on a window border.
+     *
+     * A low-level hook never sees \c WM_LBUTTONDBLCLK - that message is
+     * synthesised further along, inside the window's own message queue - so the
+     * pair has to be reconstructed here from two presses within
+     * \c GetDoubleClickTime and \c SM_CXDOUBLECLK of each other.
+     *
+     * On the left or right border that means "full width", the counterpart of
+     * the vertical maximize Windows already does on the upper and lower one.
+     * Run from \ref HandleMouseDown, right after \ref RememberPress has settled
+     * what the press landed on.
+     */
+    void HandleBorderPress();
+
+    /**
+     * \brief Applies a modifier click on a window border.
+     *
+     * Ctrl grows, Shift shrinks, Alt narrows it down to the single edge that
+     * was clicked. Handled on release rather than on the press, because a press
+     * on a border sends the window into its own sizing loop and there is
+     * nothing to be done until that has ended - which is also why a press that
+     * travelled further than \c SM_CXDRAG is left alone: that was a real resize
+     * drag and must not collect a step on top of it.
+     */
+    void HandleBorderRelease();
+
+    /**
+     * \brief Resizes the window under the pointer when the wheel turns over its border.
+     *
+     * The border under the pointer decides which edge follows the wheel; a
+     * corner moves both of its edges. The answer is cached for a moment, so
+     * that continuing to scroll keeps moving the same edge even once it has
+     * travelled out from under the pointer.
+     *
+     * \param direction \c +1 for a notch away from the user, \c -1 towards them.
+     */
+    void HandleWheel(int direction);
+
+    /**
+     * \brief Puts a step resize on hold until the sizing loop is over.
+     *
+     * The press that asked for it also started the window's modal sizing loop,
+     * and a position set while that loop runs is overwritten when it ends. The
+     * short wait is what makes a modifier click on a border land at all.
+     *
+     * \param window  Target window.
+     * \param step    Pixels per edge; negative shrinks.
+     * \param edges   Which edges move.
+     * \param hitTest The border the press landed on, so \ref RunPendingResize
+     *        knows which way to take the pointer afterwards.
+     * \param origin  Where that press was.
+     */
+    void QueueResize(HWND window, int step, SizeEdge edges, LRESULT hitTest, POINT origin);
+
+    /**
+     * \brief Takes the pointer along with the edge that has just moved.
+     *
+     * Without it a border gesture works exactly once: the edge travels out from
+     * under the pointer and the next click lands on the client area. The
+     * movement is \p edgeShift and not the step that was asked for, so a
+     * pointer never runs past an edge the screen stopped.
+     *
+     * \param from      Where the pointer was when the gesture started.
+     * \param hitTest   The border it was on.
+     * \param edgeShift How far the edges really went, from \ref mfly::ResizeWindow.
+     * \param[out] moved The new pointer position; written only on \c true.
+     * \return \c true if the pointer was moved.
+     */
+    bool FollowEdge(POINT from, LRESULT hitTest, const RECT& edgeShift, POINT& moved);
+
+    /**
+     * \brief Puts the full-width toggle on hold, see \ref QueueResize.
+     * \param window Target window.
+     */
+    void QueueMaximizeHorizontal(HWND window);
+
+    /// Runs whatever \ref QueueResize left in \ref pendingResize_.
+    void RunPendingResize();
+
+    /**
+     * \brief Runs a resize button of the flyout.
+     *
+     * Unlike \ref InvokeItem this leaves the flyout open: the buttons are meant
+     * to be pressed several times in a row.
+     *
+     * \param index Index into the tools of the flyout.
+     */
+    void InvokeTool(size_t index);
+
+    /**
+     * \brief Brings the resize hotkeys in line with ResizeConfig::hotkeys.
+     *
+     * Called after every load, so the switch takes effect within the reload it
+     * appears in. A combination somebody else already owns simply stays
+     * unavailable and is reported once in the log.
+     */
+    void ApplyHotkeySetting();
+
+    /// Releases every resize hotkey that is currently registered.
+    void UnregisterResizeHotkeys();
 
     /// Stops the dwell timer if it is running.
     void StopDwell();
@@ -291,6 +415,23 @@ private:
     void ShowTrayMenu();
 
     /**
+     * \brief Copies the configuration into the shared settings folder.
+     *
+     * Reachable through the tray menu, and only offered there when that folder
+     * is actually reachable. Reports the written path, or why it failed, in a
+     * balloon - the command has no other visible result.
+     */
+    void BackupConfiguration();
+
+    /**
+     * \brief Opens the shared folder and the local one in Beyond Compare.
+     *
+     * Silent on success: the comparer window is the result. A failure gets a
+     * balloon, because nothing else would appear.
+     */
+    void CompareConfiguration();
+
+    /**
      * \brief Re-reads the configuration file and reports the result.
      *
      * Reachable through the tray menu, and through \ref WM_MFLY_CONFIG whenever
@@ -347,6 +488,23 @@ private:
     bool      dropGraceRunning_ = false;     ///< \ref kTimerDrop is running.
     bool      pressWasContact_ = false;      ///< Last press came from pen or touch.
     LRESULT   pressHitTest_ = HTNOWHERE;     ///< What the window answered at the last press.
+    HWND      pressWindow_ = nullptr;        ///< Top-level window that was pressed.
+    UINT32    pressMods_ = kModNone;         ///< Modifiers held at that press.
+
+    POINT     lastClickPt_{-32000, -32000};  ///< Where the previous press landed.
+    ULONGLONG lastClickTick_ = 0;            ///< When it landed, for the double-click window.
+    bool      borderDoubleClick_ = false;    ///< The current press completed a double click.
+
+    PendingResize pendingResize_{};          ///< What \ref kTimerResize will apply.
+    bool      resizePending_ = false;        ///< \ref kTimerResize is running.
+
+    POINT     wheelPt_{-32000, -32000};      ///< Point the cached wheel hit test belongs to.
+    ULONGLONG wheelTick_ = 0;                ///< When that hit test was taken.
+    LRESULT   wheelHit_ = HTNOWHERE;         ///< The cached answer itself.
+    HWND      wheelWindow_ = nullptr;        ///< Window that answer came from.
+
+    /// Which resize hotkeys could be registered, indexed as \c id - \c kHotkeyWiden.
+    std::array<bool, 5> resizeHotkeys_{};
 
     State state_ = State::Idle;       ///< Current state.
     bool  paused_ = false;            ///< Detection paused.

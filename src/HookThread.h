@@ -110,6 +110,42 @@ public:
     static ULONG_PTR LastDownExtraInfo();
 
     /**
+     * \brief Which modifiers were held when the last button went down.
+     *
+     * Read while handling \ref WM_MFLY_MOUSEDOWN or \ref WM_MFLY_MOUSEUP.
+     * Asking \c GetAsyncKeyState at that point would be a different question:
+     * the message is handled a few milliseconds later, and a user who releases
+     * Ctrl together with the mouse button would have their Ctrl+click arrive as
+     * a plain one. The hook records the state at the moment of the press, where
+     * the intent was expressed.
+     *
+     * \return A combination of \ref kModCtrl, \ref kModShift and \ref kModAlt.
+     */
+    static UINT32 LastDownModifiers();
+
+    /**
+     * \brief Position of the last button press.
+     *
+     * The counterpart of \ref LastUpPoint, and what the double-click detection
+     * measures its distance against.
+     *
+     * \return The press point in screen coordinates.
+     */
+    static POINT LastDownPoint();
+
+    /**
+     * \brief Position of the last wheel notch.
+     *
+     * \ref WM_MFLY_WHEEL is posted, so by the time it is handled the pointer
+     * may already be somewhere else - over a scrolling list, say, that the
+     * notch just moved. The point the notch happened at is the one that decides
+     * whether it meant a window border.
+     *
+     * \return The wheel point in screen coordinates.
+     */
+    static POINT LastWheelPoint();
+
+    /**
      * \brief Position of the last button release.
      *
      * \ref WM_MFLY_DRAGEND can arrive a moment after the finger has left the
