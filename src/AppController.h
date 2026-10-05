@@ -464,7 +464,7 @@ private:
      */
     void SetPaused(bool paused);
 
-    /// Creates the application tray icon (ID 0).
+    /// Creates the application tray icon (ID 0), or refreshes it if it exists.
     void AddAppTrayIcon();
 
     /// Removes the application tray icon.
@@ -474,6 +474,7 @@ private:
     HWND      hwnd_ = nullptr;      ///< Invisible controller window.
     HICON     appIcon_ = nullptr;   ///< Program icon in window size (Alt-Tab, taskbar).
     HICON     trayIcon_ = nullptr;  ///< Program icon in notification area size.
+    UINT      taskbarCreatedMsg_ = 0;  ///< Registered "TaskbarCreated" message.
 
     HookThread    hooks_;   ///< Low-level hooks on their own thread.
     FlyoutWindow  flyout_;  ///< The popup.

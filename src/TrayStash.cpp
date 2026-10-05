@@ -53,16 +53,7 @@ bool TrayStash::Stash(HWND target) {
     entry.icon = GetWindowIconSmall(target, entry.ownsIcon);
 
     NOTIFYICONDATAW nid{};
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = owner_;
-    nid.uID = entry.id;
-    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-    nid.uCallbackMessage = WM_MFLY_TRAY;
-    nid.hIcon = entry.icon;
-    ::GetWindowTextW(target, nid.szTip, ARRAYSIZE(nid.szTip) - 1);
-    if (nid.szTip[0] == L'\0') {
-        ::lstrcpynW(nid.szTip, L"(untitled)", ARRAYSIZE(nid.szTip));
-    }
+    FillIconData(entry, nid);
 
     if (!::Shell_NotifyIconW(NIM_ADD, &nid)) {
         if (entry.ownsIcon && entry.icon) ::DestroyIcon(entry.icon);
@@ -73,6 +64,31 @@ bool TrayStash::Stash(HWND target) {
     entries_.push_back(entry);
     WRITE_INFO_LOG(log::dformat(L"Window stashed, id {}", entry.id), log::Describe(target));
     return true;
+}
+
+void TrayStash::FillIconData(const Entry& entry, NOTIFYICONDATAW& nid) const {
+    nid = NOTIFYICONDATAW{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = owner_;
+    nid.uID = entry.id;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    nid.uCallbackMessage = WM_MFLY_TRAY;
+    nid.hIcon = entry.icon;
+    ::GetWindowTextW(entry.window, nid.szTip, ARRAYSIZE(nid.szTip) - 1);
+    if (nid.szTip[0] == L'\0') {
+        ::lstrcpynW(nid.szTip, L"(untitled)", ARRAYSIZE(nid.szTip));
+    }
+}
+
+void TrayStash::ReAddIcons() {
+    for (const Entry& entry : entries_) {
+        NOTIFYICONDATAW nid{};
+        FillIconData(entry, nid);
+        if (!::Shell_NotifyIconW(NIM_ADD, &nid) && !::Shell_NotifyIconW(NIM_MODIFY, &nid)) {
+            WRITE_WARNING_LOG(log::dformat(L"Stash icon {} could not be added again", entry.id),
+                              log::Describe(entry.window));
+        }
+    }
 }
 
 void TrayStash::RemoveEntry(size_t index, bool restoreWindow) {

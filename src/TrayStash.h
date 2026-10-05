@@ -7,6 +7,8 @@
 
 #include "Common.h"
 
+#include <shellapi.h>  // NOTIFYICONDATAW
+
 namespace mfly {
 
 /**
@@ -61,6 +63,14 @@ public:
      */
     void DropDeadWindows();
 
+    /**
+     * \brief Adds the icons of all stashed windows again.
+     *
+     * Called after Explorer recreated the taskbar: the icons are gone then,
+     * and without them the hidden windows could not be brought back.
+     */
+    void ReAddIcons();
+
     /// \return \c true if no window is currently stashed.
     bool empty() const { return entries_.empty(); }
 
@@ -79,6 +89,13 @@ private:
      * \param restoreWindow  \c true shows the window again.
      */
     void RemoveEntry(size_t index, bool restoreWindow);
+
+    /**
+     * \brief Fills the notification data for an entry.
+     * \param entry Stashed window.
+     * \param nid   Receives icon, callback and tooltip.
+     */
+    void FillIconData(const Entry& entry, NOTIFYICONDATAW& nid) const;
 
     HWND owner_ = nullptr;        ///< Recipient of the tray notifications.
     UINT nextId_ = 1;             ///< Next icon ID (0 belongs to the app icon).

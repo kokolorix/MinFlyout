@@ -208,6 +208,18 @@ bool AppController::Init(HINSTANCE instance) {
 
     TrayStash::Instance().Init(hwnd_);
 
+    // Without this the icon is lost for good the first time explorer.exe
+    // restarts. The filter matters when we run elevated: UIPI would otherwise
+    // drop the broadcast from the medium-integrity Explorer.
+    taskbarCreatedMsg_ = ::RegisterWindowMessageW(L"TaskbarCreated");
+    if (taskbarCreatedMsg_ != 0) {
+        ::ChangeWindowMessageFilterEx(hwnd_, taskbarCreatedMsg_, MSGFLT_ALLOW, nullptr);
+    } else {
+        WRITE_WARNING_LOG(L"TaskbarCreated could not be registered, the tray icon "
+                          L"will not survive an Explorer restart",
+                          log::dformat(L"error {}", ::GetLastError()));
+    }
+
     ConfigStore::Instance().Reload();  // creates the template on first run
     const Config& config = ConfigStore::Instance().current();
     log::SetFileLogging(config.logToFile);
@@ -1191,7 +1203,13 @@ void AppController::AddAppTrayIcon() {
                L"\nCtrl+Alt+F12 diagnose  Ctrl+Alt+F11 copy zone",
                BuildStamp());
     ::lstrcpynW(nid.szTip, tip, ARRAYSIZE(nid.szTip));
-    ::Shell_NotifyIconW(NIM_ADD, &nid);
+
+    // NIM_ADD fails if the icon still exists (TaskbarCreated after a DPI
+    // change can leave it in place) - then refresh it instead.
+    if (!::Shell_NotifyIconW(NIM_ADD, &nid) && !::Shell_NotifyIconW(NIM_MODIFY, &nid)) {
+        WRITE_WARNING_LOG(L"Tray icon could not be added",
+                          log::dformat(L"error {}", ::GetLastError()));
+    }
 }
 
 void AppController::RemoveAppTrayIcon() {
@@ -1355,6 +1373,17 @@ LRESULT CALLBACK AppController::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
 }
 
 LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
+    // Registered message, so not a case label. Explorer broadcasts it whenever
+    // the taskbar is (re)created - after a crash or restart of explorer.exe,
+    // and on some builds after a DPI change. Every notification icon is gone
+    // at that point and has to be added again by its owner.
+    if (taskbarCreatedMsg_ != 0 && msg == taskbarCreatedMsg_) {
+        WRITE_INFO_LOG(L"Taskbar recreated, adding tray icons again");
+        AddAppTrayIcon();
+        TrayStash::Instance().ReAddIcons();
+        return 0;
+    }
+
     switch (msg) {
     case WM_MFLY_MOUSEMOVE:
         HandleMouseMove();
