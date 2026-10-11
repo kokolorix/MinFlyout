@@ -150,7 +150,7 @@ private:
  * widened when a line is actually written.
  */
 struct Writer {
-    const wchar_t* level;     ///< DEBUG, INFO, WARN or ERROR - names log viewers recognise.
+    const wchar_t* level;     ///< DEBUG, INFO, WARNING or ERROR - names log viewers and Debug-Log.ps1 recognise.
     const char*    function;  ///< \c __FUNCTION__ of the call site.
     const char*    file;      ///< \c __FILE__ of the call site.
     int            line;      ///< \c __LINE__ of the call site.
@@ -207,7 +207,7 @@ inline void Discard(const Args&... args) { (void)sizeof...(args); }
 /// Logs at level INFO; call it like a function, see \ref mfly::log::Writer.
 #define WRITE_INFO_LOG    ::mfly::log::Writer{L"INFO",    __FUNCTION__, __FILE__, __LINE__}
 /// Logs at level WARNING; call it like a function, see \ref mfly::log::Writer.
-#define WRITE_WARNING_LOG ::mfly::log::Writer{L"WARN",    __FUNCTION__, __FILE__, __LINE__}
+#define WRITE_WARNING_LOG ::mfly::log::Writer{L"WARNING", __FUNCTION__, __FILE__, __LINE__}
 /// Logs at level ERROR; call it like a function, see \ref mfly::log::Writer.
 #define WRITE_ERROR_LOG   ::mfly::log::Writer{L"ERROR",   __FUNCTION__, __FILE__, __LINE__}
 

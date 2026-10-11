@@ -5,9 +5,12 @@
  */
 #include "Log.h"
 
+#include <shellapi.h>
 #include <shlobj.h>
 
+#include <cwchar>
 #include <mutex>
+#include <string_view>
 
 namespace mfly::log {
 namespace {
@@ -18,6 +21,17 @@ constexpr LONGLONG kMaxFileBytes = 1LL << 20;  // 1 MiB
 std::mutex g_mutex;              ///< Serializes writers from UI and hook thread.
 bool       g_fileLogging = false;///< File sink switched on.
 std::wstring g_filePath;         ///< Cached path of the log file.
+
+/**
+ * First line of every log file. Debug-Log.ps1 reads the file with
+ * ConvertFrom-Csv and finds the columns by these names (the ClipWatch
+ * spelling); LogViewPlus and Excel show them as column titles.
+ */
+constexpr char kHeader[] =
+    "Zeit\tThread\tLogLevel\tDuration(ms)\tMessage\tFunction\tLogSource\tDetail\r\n";
+
+/// UTF-8 byte order mark.
+constexpr char kBom[] = "\xEF\xBB\xBF";
 
 /**
  * \brief Widens a narrow literal (\c __FILE__, \c __FUNCTION__).
@@ -117,15 +131,51 @@ void AppendToFile(const std::wstring& line) {
         ::WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()),
                               utf8.data(), needed, nullptr, nullptr);
 
-        // A BOM in a fresh file makes Notepad and Excel pick UTF-8 by themselves.
+        // A BOM in a fresh file makes Notepad and Excel pick UTF-8 by themselves;
+        // the header names the columns for Debug-Log.ps1 and the viewers.
         if (::SetFilePointer(file, 0, nullptr, FILE_END) == 0) {
             DWORD written = 0;
-            ::WriteFile(file, "\xEF\xBB\xBF", 3, &written, nullptr);
+            ::WriteFile(file, kBom, sizeof(kBom) - 1, &written, nullptr);
+            ::WriteFile(file, kHeader, sizeof(kHeader) - 1, &written, nullptr);
         }
         DWORD written = 0;
         ::WriteFile(file, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
     }
     ::CloseHandle(file);
+}
+
+/**
+ * \brief Moves a log file written before the header existed out of the way.
+ *
+ * Debug-Log.ps1 takes the first line as column names, so a file without the
+ * header would lose its first entry and show every column wrongly. It is
+ * renamed to ".1" like a rotated file and stays available there.
+ *
+ * \param path Path of the log file.
+ */
+void RetireFileWithoutHeader(const std::wstring& path) {
+    HANDLE file = ::CreateFileW(path.c_str(), GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;  // no file yet
+
+    char start[sizeof(kBom) - 1 + 5] = {};  // BOM + "Zeit\t"
+    DWORD read = 0;
+    const BOOL ok = ::ReadFile(file, start, sizeof(start), &read, nullptr);
+    ::CloseHandle(file);
+    if (!ok || read == 0) return;  // empty: the next write adds the header
+
+    const std::string_view expected = std::string_view(kBom, sizeof(kBom) - 1);
+    const std::string_view actual(start, read);
+    if (actual.size() == sizeof(start) &&
+        actual.substr(0, expected.size()) == expected &&
+        actual.substr(expected.size()) == std::string_view(kHeader, 5)) {
+        return;
+    }
+
+    const std::wstring previous = path + L".1";
+    ::DeleteFileW(previous.c_str());
+    ::MoveFileW(path.c_str(), previous.c_str());
 }
 
 }  // namespace
@@ -140,6 +190,7 @@ void writeDebugLog(const std::wstring& line) {
 void SetFileLogging(bool enabled) {
     std::lock_guard<std::mutex> guard(g_mutex);
     if (enabled && g_filePath.empty()) g_filePath = ResolveFilePath();
+    if (enabled && !g_fileLogging && !g_filePath.empty()) RetireFileWithoutHeader(g_filePath);
     g_fileLogging = enabled && !g_filePath.empty();
 }
 
