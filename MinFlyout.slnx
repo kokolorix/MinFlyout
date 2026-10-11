@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/Tools/">
+    <!-- Doxygen: built on request only, never as part of the solution build. -->
+    <Project Path="docs/docs.vcxproj" Id="afbf5b34-2c7a-4309-adbf-e76220251712">
+      <Build Project="false" />
+    </Project>
+  </Folder>
+  <Project Path="minflyout.vcxproj" Id="95d14441-17ba-46d6-8821-d05a934b7308" />
+</Solution>
