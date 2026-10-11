@@ -75,6 +75,45 @@ void SetFileLogging(bool enabled);
 std::wstring FilePath();
 
 /**
+ * \brief Opens the log file for reading.
+ *
+ * Prefers LogViewPlus, which understands the tab separated columns; falls
+ * back to Excel and finally to whatever is associated with \c .log.
+ *
+ * \param owner Owner window for any shell UI.
+ * \return \c true when a program was started. \c false also when there is no
+ *         log file yet - check \ref FilePath first to tell the cases apart.
+ */
+bool OpenLog(HWND owner);
+
+/**
+ * \brief Opens the log folder in Explorer, with the log file selected.
+ * \param owner Owner window for any shell UI.
+ * \return \c true when Explorer was started.
+ */
+bool OpenLogFolder(HWND owner);
+
+/// Outcome of \ref OpenLogHtml.
+enum class HtmlViewResult {
+    Started,        ///< The viewer is starting; the browser opens once it serves.
+    NoLogFile,      ///< There is no log file yet.
+    ScriptMissing,  ///< Debug-Log.cmd/.ps1 are not next to the executable.
+    Failed,         ///< ShellExecute refused.
+};
+
+/**
+ * \brief Opens the interactive HTML view through Debug-Log.cmd/.ps1.
+ *
+ * Debug-Log.cmd is the intended entry point: it starts the PowerShell viewer
+ * with \c -Serve and opens the browser once the URL is known. Without it the
+ * script is started directly through PowerShell 7 or Windows PowerShell.
+ * The post-build step copies both next to the executable.
+ *
+ * \param owner Owner window for any shell UI.
+ */
+HtmlViewResult OpenLogHtml(HWND owner);
+
+/**
  * \brief Describes a foreign window for the detail column.
  *
  * Produces something like \c "'Untitled - Notepad' [Notepad] pid 1234" - class

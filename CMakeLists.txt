@@ -47,6 +47,15 @@ target_compile_definitions(minflyout PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEA
 # DPI and DWM functions are resolved at run time via GetProcAddress.
 target_link_libraries(minflyout PRIVATE user32 gdi32 shell32 advapi32 ole32 uuid)
 
+# The log viewer (tray menu "Open log as HTML") looks for its scripts next to
+# the executable. The pCloud deployment exists only in minflyout.vcxproj.
+add_custom_command(TARGET minflyout POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/Debug-Log.cmd
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/Debug-Log.ps1
+            $<TARGET_FILE_DIR:minflyout>
+    COMMENT "Copying the log viewer scripts next to the executable")
+
 if(MSVC)
     target_compile_options(minflyout PRIVATE /W4 /permissive- /utf-8)
     # With MSVC the manifest tool binds in the manifest.

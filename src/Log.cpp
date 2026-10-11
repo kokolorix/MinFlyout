@@ -148,6 +148,260 @@ std::wstring FilePath() {
     return g_filePath.empty() ? ResolveFilePath() : g_filePath;
 }
 
+// ---------------------------------------------------------------------------
+// Opening the log (tray menu). Same lookup order as ClipWatch.
+// ---------------------------------------------------------------------------
+namespace {
+
+/// \return \c true when \p path names an existing file (not a directory).
+bool IsFile(const std::wstring& path) {
+    if (path.empty()) return false;
+    const DWORD attributes = ::GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+/// \return Everything before the last backslash, or empty.
+std::wstring ParentFolder(const std::wstring& path) {
+    const size_t slash = path.find_last_of(L"\\/");
+    return (slash == std::wstring::npos) ? std::wstring() : path.substr(0, slash);
+}
+
+/// \return \p path in double quotes, for a command line.
+std::wstring Quote(const std::wstring& path) {
+    return L"\"" + path + L"\"";
+}
+
+/**
+ * \brief Reads a REG_SZ value, without surrounding quotes.
+ * \param value Value name, \c nullptr for the default value.
+ * \return The string, or empty when the value is missing.
+ */
+std::wstring ReadRegistryString(HKEY root, const wchar_t* key, const wchar_t* value) {
+    DWORD bytes = 0;
+    if (::RegGetValueW(root, key, value, RRF_RT_REG_SZ, nullptr, nullptr, &bytes) != ERROR_SUCCESS) {
+        return std::wstring();
+    }
+
+    std::wstring result(bytes / sizeof(wchar_t), L'\0');
+    if (::RegGetValueW(root, key, value, RRF_RT_REG_SZ, nullptr, result.data(), &bytes) != ERROR_SUCCESS) {
+        return std::wstring();
+    }
+
+    result.resize(std::wcslen(result.c_str()));
+    if (result.size() >= 2 && result.front() == L'"' && result.back() == L'"') {
+        result = result.substr(1, result.size() - 2);
+    }
+    return result;
+}
+
+/**
+ * \brief Looks an executable up in the registry's App Paths.
+ * \return Full path, or empty when the program is not installed.
+ */
+std::wstring FindInstalledProgram(const wchar_t* executable) {
+    const std::wstring key =
+        std::wstring(LR"(Software\Microsoft\Windows\CurrentVersion\App Paths\)") + executable;
+
+    for (const HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+        const std::wstring path = ReadRegistryString(root, key.c_str(), nullptr);
+        if (IsFile(path)) return path;
+    }
+    return std::wstring();
+}
+
+/**
+ * \brief Looks a program up in the uninstall entries of the registry.
+ *
+ * Every installer registers there, wherever it puts the files, so this also
+ * finds per-user installations below \c %LOCALAPPDATA%. The executable is
+ * taken from \c InstallLocation, or else from \c DisplayIcon, which usually
+ * points at it ("C:\...\App.exe,0").
+ *
+ * \param displayName Start of the entry's DisplayName, case-insensitive.
+ * \param executable  File name of the program.
+ * \return Full path, or empty.
+ */
+std::wstring FindUninstallEntry(std::wstring_view displayName, const wchar_t* executable) {
+    struct Root {
+        HKEY           key;
+        const wchar_t* path;
+    };
+    static const Root kRoots[] = {
+        {HKEY_CURRENT_USER,  LR"(Software\Microsoft\Windows\CurrentVersion\Uninstall)"},
+        {HKEY_LOCAL_MACHINE, LR"(Software\Microsoft\Windows\CurrentVersion\Uninstall)"},
+        {HKEY_LOCAL_MACHINE, LR"(Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall)"},
+    };
+
+    for (const Root& root : kRoots) {
+        HKEY uninstall = nullptr;
+        if (::RegOpenKeyExW(root.key, root.path, 0, KEY_READ, &uninstall) != ERROR_SUCCESS) continue;
+
+        std::wstring found;
+        wchar_t name[256];
+        for (DWORD index = 0; found.empty(); ++index) {
+            DWORD length = ARRAYSIZE(name);
+            const LSTATUS status = ::RegEnumKeyExW(uninstall, index, name, &length,
+                                                   nullptr, nullptr, nullptr, nullptr);
+            if (status == ERROR_NO_MORE_ITEMS) break;
+            if (status != ERROR_SUCCESS) continue;
+
+            const std::wstring entry = std::wstring(root.path) + L"\\" + name;
+            const std::wstring title = ReadRegistryString(root.key, entry.c_str(), L"DisplayName");
+            if (title.size() < displayName.size() ||
+                ::CompareStringOrdinal(title.c_str(), static_cast<int>(displayName.size()),
+                                       displayName.data(), static_cast<int>(displayName.size()),
+                                       TRUE) != CSTR_EQUAL) {
+                continue;
+            }
+
+            std::wstring location = ReadRegistryString(root.key, entry.c_str(), L"InstallLocation");
+            if (!location.empty()) {
+                if (location.back() != L'\\') location += L'\\';
+                if (IsFile(location + executable)) found = location + executable;
+            }
+            if (found.empty()) {
+                std::wstring icon = ReadRegistryString(root.key, entry.c_str(), L"DisplayIcon");
+                const size_t comma = icon.rfind(L',');
+                if (comma != std::wstring::npos &&
+                    icon.find_first_not_of(L"-0123456789", comma + 1) == std::wstring::npos) {
+                    icon.erase(comma);  // icon index
+                }
+                if (icon.size() >= 2 && icon.front() == L'"' && icon.back() == L'"') {
+                    icon = icon.substr(1, icon.size() - 2);
+                }
+                const size_t slash = icon.find_last_of(L"\\/");
+                const wchar_t* file = icon.c_str() + (slash == std::wstring::npos ? 0 : slash + 1);
+                if (::_wcsicmp(file, executable) == 0 && IsFile(icon)) found = icon;
+            }
+        }
+
+        ::RegCloseKey(uninstall);
+        if (!found.empty()) return found;
+    }
+    return std::wstring();
+}
+
+/// \return A known folder, or empty.
+std::wstring KnownFolder(REFKNOWNFOLDERID id) {
+    PWSTR folder = nullptr;
+    if (FAILED(::SHGetKnownFolderPath(id, 0, nullptr, &folder))) return std::wstring();
+    std::wstring path(folder);
+    ::CoTaskMemFree(folder);
+    return path;
+}
+
+/**
+ * \brief LogViewPlus, which often installs outside the App Paths key.
+ *
+ * Tried in turn: App Paths, the uninstall entries, then the folders the
+ * per-user and per-machine installers use.
+ */
+std::wstring FindLogViewPlus() {
+    constexpr wchar_t kExecutable[] = L"LogViewPlus.exe";
+
+    if (std::wstring path = FindInstalledProgram(kExecutable); !path.empty()) return path;
+    if (std::wstring path = FindUninstallEntry(L"LogViewPlus", kExecutable); !path.empty()) return path;
+
+    const std::wstring localAppData = KnownFolder(FOLDERID_LocalAppData);
+    const std::wstring programFiles = KnownFolder(FOLDERID_ProgramFiles);
+    const std::wstring programFilesX86 = KnownFolder(FOLDERID_ProgramFilesX86);
+    const std::wstring candidates[] = {
+        localAppData.empty()    ? std::wstring() : localAppData + L"\\LogViewPlus",
+        localAppData.empty()    ? std::wstring() : localAppData + L"\\Programs\\LogViewPlus",
+        programFiles.empty()    ? std::wstring() : programFiles + L"\\LogViewPlus",
+        programFilesX86.empty() ? std::wstring() : programFilesX86 + L"\\LogViewPlus",
+    };
+    for (const std::wstring& folder : candidates) {
+        if (folder.empty()) continue;
+        const std::wstring path = folder + L"\\" + kExecutable;
+        if (IsFile(path)) return path;
+    }
+    return std::wstring();
+}
+
+/// \return Folder of the running executable, or empty.
+std::wstring ExecutableFolder() {
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD length = ::GetModuleFileNameW(nullptr, path.data(),
+                                                  static_cast<DWORD>(path.size()));
+        if (length == 0) return std::wstring();
+        if (length < path.size()) {
+            path.resize(length);
+            break;
+        }
+        path.resize(path.size() * 2);  // truncated: long path
+    }
+    return ParentFolder(path);
+}
+
+/// Starts \p application with \p arguments; \return \c true on success.
+bool Launch(HWND owner, const std::wstring& application, const std::wstring& arguments,
+            const std::wstring& workingDirectory) {
+    const HINSTANCE result = ::ShellExecuteW(
+        owner, L"open", application.c_str(),
+        arguments.empty() ? nullptr : arguments.c_str(),
+        workingDirectory.empty() ? nullptr : workingDirectory.c_str(), SW_SHOWNORMAL);
+    return reinterpret_cast<INT_PTR>(result) > 32;
+}
+
+}  // namespace
+
+bool OpenLog(HWND owner) {
+    const std::wstring path = FilePath();
+    if (!IsFile(path)) return false;
+
+    const std::wstring folder = ParentFolder(path);
+
+    if (const std::wstring viewer = FindLogViewPlus(); !viewer.empty()) {
+        return Launch(owner, viewer, Quote(path), folder);
+    }
+    if (const std::wstring excel = FindInstalledProgram(L"excel.exe"); !excel.empty()) {
+        return Launch(owner, excel, Quote(path), folder);
+    }
+    // Neither is installed: hand the file to whatever is associated with it.
+    return Launch(owner, path, std::wstring(), folder);
+}
+
+HtmlViewResult OpenLogHtml(HWND owner) {
+    const std::wstring path = FilePath();
+    if (!IsFile(path)) return HtmlViewResult::NoLogFile;
+
+    const std::wstring folder = ExecutableFolder();
+    if (folder.empty()) return HtmlViewResult::ScriptMissing;
+
+    const std::wstring command = folder + L"\\Debug-Log.cmd";
+    if (IsFile(command)) {
+        return Launch(owner, command, Quote(path), folder) ? HtmlViewResult::Started
+                                                           : HtmlViewResult::Failed;
+    }
+
+    // Fall back to the script itself, through PowerShell 7 or Windows PowerShell.
+    // Without the .cmd nobody opens the browser; the script prints the URL.
+    const std::wstring script = folder + L"\\Debug-Log.ps1";
+    if (!IsFile(script)) return HtmlViewResult::ScriptMissing;
+
+    std::wstring shell = FindInstalledProgram(L"pwsh.exe");
+    if (shell.empty()) shell = L"powershell.exe";
+
+    const std::wstring arguments = L"-NoProfile -ExecutionPolicy Bypass -File " +
+                                   Quote(script) + L" -Serve " + Quote(path);
+    return Launch(owner, shell, arguments, folder) ? HtmlViewResult::Started
+                                                   : HtmlViewResult::Failed;
+}
+
+bool OpenLogFolder(HWND owner) {
+    const std::wstring path = FilePath();
+    if (IsFile(path)) {
+        return Launch(owner, L"explorer.exe", L"/select," + Quote(path), std::wstring());
+    }
+
+    // No file yet: the folder itself (ResolveFilePath has created it).
+    const std::wstring folder = ParentFolder(path);
+    return !folder.empty() && Launch(owner, folder, std::wstring(), std::wstring());
+}
+
 std::wstring Describe(HWND window) {
     if (!window || !::IsWindow(window)) return L"(invalid window)";
 

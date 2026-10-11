@@ -382,6 +382,17 @@ private:
     /// Writes a fresh diagnosis and opens the file in the default editor.
     void OpenDiagnosisFile();
 
+    /**
+     * \brief Opens the log file.
+     *
+     * Explains in a balloon why there is nothing to open when the file does
+     * not exist - logging off in the configuration or compiled out.
+     *
+     * \param html \c false opens the file itself (LogViewPlus, Excel or the
+     *        association), \c true the interactive view of Debug-Log.cmd.
+     */
+    void OpenLogFile(bool html);
+
     void OpenFlyout();
 
     /**

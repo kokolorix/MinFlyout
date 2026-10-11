@@ -203,5 +203,7 @@
     <None Include="$(APPDATA)\$(ProjectName)\config.jsonc">
       <Filter>Configuration</Filter>
     </None>
+    <None Include="tools\Debug-Log.cmd" />
+    <None Include="tools\Debug-Log.ps1" />
   </ItemGroup>
 </Project>

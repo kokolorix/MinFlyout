@@ -50,6 +50,33 @@
       <SubSystem>Windows</SubSystem>
       <!-- wWinMain: the linker picks wWinMainCRTStartup automatically. -->
     </Link>
+    <!-- The log viewer (tray menu "Open log as HTML") looks for its scripts
+         next to the executable. Release additionally deploys to pCloud when
+         the drive is there, ending a running copy first so it can be replaced. -->
+    <PostBuildEvent>
+      <Command Condition="'$(Configuration)'=='Debug'">
+xcopy /Y /D /Q "$(ProjectDir)tools\Debug-Log.cmd" "$(TargetDir)" &gt;nul
+xcopy /Y /D /Q "$(ProjectDir)tools\Debug-Log.ps1" "$(TargetDir)" &gt;nul
+      </Command>
+      <Message Condition="'$(Configuration)'=='Debug'">Copying the log viewer scripts next to the executable</Message>
+      <Command Condition="'$(Configuration)'=='Release'">
+xcopy /Y /D /Q "$(ProjectDir)tools\Debug-Log.cmd" "$(TargetDir)" &gt;nul
+xcopy /Y /D /Q "$(ProjectDir)tools\Debug-Log.ps1" "$(TargetDir)" &gt;nul
+if exist P:\Sachen\SW\Tools\$(ProjectName)\$(Platform) (
+  tasklist /FI "IMAGENAME eq $(TargetFileName)" /NH | find /I "$(TargetFileName)" &gt;nul &amp;&amp; sudo taskkill /IM "$(TargetFileName)" &gt;nul &amp;&amp; ping -n 3 127.0.0.1 &gt;nul
+  xcopy /Y /D /Q "$(TargetPath)" "P:\Sachen\SW\Tools\$(ProjectName)\$(Platform)"
+  xcopy /Y /D /Q "$(TargetDir)Debug-Log.cmd" "P:\Sachen\SW\Tools\$(ProjectName)\$(Platform)" &gt;nul
+  xcopy /Y /D /Q "$(TargetDir)Debug-Log.ps1" "P:\Sachen\SW\Tools\$(ProjectName)\$(Platform)" &gt;nul
+)
+      </Command>
+      <Message Condition="'$(Configuration)'=='Release'">Copying the log viewer scripts next to the executable and deploy to pCloud</Message>
+    </PostBuildEvent>
+    <ClCompile>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">_RELEASE_WITH_DEBUG_LOG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">_RELEASE_WITH_DEBUG_LOG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
@@ -113,6 +140,8 @@
     <None Include="res\icon.svg" />
     <None Include="res\config.schema.json" />
     <None Include="tools\build_icon.py" />
+    <None Include="tools\Debug-Log.cmd" />
+    <None Include="tools\Debug-Log.ps1" />
   </ItemGroup>
   <ItemGroup>
     <!-- Bound in automatically by the manifest tool:

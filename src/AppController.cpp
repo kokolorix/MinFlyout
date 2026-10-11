@@ -32,6 +32,9 @@ constexpr UINT kMenuOpenDiagnosis = 105; ///< Menu command: open the diagnosis f
 constexpr UINT kMenuCopyZone = 106;  ///< Menu command: copy the zone of the active window.
 constexpr UINT kMenuBackupConfig = 107;  ///< Menu command: copy the configuration to the share.
 constexpr UINT kMenuCompareConfig = 108; ///< Menu command: diff the share against this machine.
+constexpr UINT kMenuOpenLog = 109;   ///< Menu command: open the log file.
+constexpr UINT kMenuOpenLogFolder = 110; ///< Menu command: show the log file in Explorer.
+constexpr UINT kMenuOpenLogHtml = 111;   ///< Menu command: interactive HTML view of the log.
 constexpr UINT kMenuExit = 104;      ///< Menu command: exit.
 
 /// ID of the diagnosis hotkey (Ctrl+Alt+F12).
@@ -984,6 +987,47 @@ void AppController::OpenDiagnosisFile() {
     ::ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+void AppController::OpenLogFile(bool html) {
+    const std::wstring path = log::FilePath();
+    const DWORD attributes = path.empty() ? INVALID_FILE_ATTRIBUTES
+                                          : ::GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+#if defined(_DEBUG) || defined(_RELEASE_WITH_DEBUG_LOG)
+        ShowTrayBalloon(L"No log file yet",
+                        L"Set \"logToFile\": true in the configuration to write one.", false);
+#else
+        ShowTrayBalloon(L"No log file",
+                        L"This build has logging compiled out.", false);
+#endif
+        return;
+    }
+
+    if (!html) {
+        WRITE_DEBUG_LOG(L"Tray: open log", path);
+        if (!log::OpenLog(hwnd_)) {
+            ShowTrayBalloon(L"MinFlyout", L"The log file could not be opened.", true);
+        }
+        return;
+    }
+
+    WRITE_DEBUG_LOG(L"Tray: open log as HTML", path);
+    switch (log::OpenLogHtml(hwnd_)) {
+    case log::HtmlViewResult::Started:
+        break;
+    case log::HtmlViewResult::NoLogFile:  // deleted in the meantime
+        ShowTrayBalloon(L"MinFlyout", L"There is no log file.", false);
+        break;
+    case log::HtmlViewResult::ScriptMissing:
+        ShowTrayBalloon(L"Debug-Log.cmd not found",
+                        L"It belongs next to MinFlyout.exe; the post-build step copies it there.",
+                        true);
+        break;
+    case log::HtmlViewResult::Failed:
+        ShowTrayBalloon(L"MinFlyout", L"The HTML view could not be started.", true);
+        break;
+    }
+}
+
 void AppController::TraceGate(HWND window, POINT pt, const wchar_t* gate) {
     // Without the trace flag every window still gets one line the first time it
     // is rejected. That is bounded by the number of windows on the desktop and
@@ -1322,6 +1366,9 @@ void AppController::ShowTrayMenu() {
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     ::AppendMenuW(menu, MF_STRING, kMenuOpenDiagnosis,
                   L"Open diagnosis file\t Ctrl+Alt+F12 writes it");
+    ::AppendMenuW(menu, MF_STRING, kMenuOpenLog, L"Open log");
+    ::AppendMenuW(menu, MF_STRING, kMenuOpenLogHtml, L"Open log as HTML");
+    ::AppendMenuW(menu, MF_STRING, kMenuOpenLogFolder, L"Open log folder");
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     ::AppendMenuW(menu, MF_STRING, kMenuExit, L"Exit");
 
@@ -1503,6 +1550,13 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case kMenuOpenConfig:   ConfigStore::Instance().OpenInEditor(); return 0;
         case kMenuReloadConfig: ReloadConfig(); return 0;
         case kMenuOpenDiagnosis: OpenDiagnosisFile(); return 0;
+        case kMenuOpenLog:      OpenLogFile(false); return 0;
+        case kMenuOpenLogHtml:  OpenLogFile(true); return 0;
+        case kMenuOpenLogFolder:
+            if (!log::OpenLogFolder(hwnd_)) {
+                ShowTrayBalloon(L"MinFlyout", L"The log folder could not be opened.", true);
+            }
+            return 0;
         case kMenuCopyZone:     CaptureZone(menuTarget_); return 0;
         case kMenuBackupConfig: BackupConfiguration(); return 0;
         case kMenuCompareConfig: CompareConfiguration(); return 0;
