@@ -599,10 +599,11 @@ WRITE_ERROR_LOG(L"SetWindowPos failed", detail, elapsed.ElapsedMs());
 ```
 
 The macros expand to a functor carrying level, `__FUNCTION__`, `__FILE__` and `__LINE__`, so
-the call site stays short. Every line is tab separated and can be pasted into a spreadsheet:
+the call site stays short. Every line is tab separated and can be pasted into a spreadsheet;
+the file starts with a header row naming the columns:
 
 ```
-time                     thread  level  duration  message                    function            file(line)          detail
+Zeit                     Thread  LogLevel  Duration(ms)  Message              Function            LogSource           Detail
 2026-08-19 22:14:07.913  9284    DEBUG  3         Minimize button detected 46x32  mfly::AppController::HandleMouseMove  AppController.cpp(193)  'Untitled - Notepad' [Notepad] pid 5312
 ```
 
@@ -612,6 +613,13 @@ time                     thread  level  duration  message                    fun
 * Output always goes to `OutputDebugStringW` (visible in DebugView or the VS output window).
   `"logToFile": true` in the configuration additionally writes
   `%APPDATA%\MinFlyout\minflyout.log`, UTF-8 with BOM, rotated to `.log.1` at 1 MB.
+  A file from before the header row existed is moved to `.log.1` when logging starts.
+* The tray menu opens the log: *Open log* (LogViewPlus, else Excel, else the `.log`
+  association), *Open log as HTML* and *Open log folder* (Explorer, file selected).
+* *Open log as HTML* runs `Debug-Log.cmd` next to the EXE, the viewer shared with ClipWatch
+  (`tools/Debug-Log.cmd`, `tools/Debug-Log.ps1`; the post-build step copies them). It reads
+  the columns by the header names, which is why they use the ClipWatch spelling, and
+  counts levels by `WARNING`, not `WARN`.
 * `mfly::log::Stopwatch` feeds the duration column from the performance counter;
   `mfly::log::Describe(hwnd)` renders a foreign window as `'title' [class] pid N`.
 * Nothing is logged from the hook callbacks or from the pre-test that runs on every throttled
@@ -635,26 +643,31 @@ is not part of a specifier — here the tab. The eight columns map like this:
 |---|---|---|---|
 | 1 | `2026-08-19 22:14:07.913` | `%d{yyyy-MM-dd HH:mm:ss.fff}` | `fff` matches exactly three digits |
 | 2 | thread id | `%t` | UI thread and hook thread are told apart by this |
-| 3 | `DEBUG` `INFO` `WARN` `ERROR` | `%p` | the level names LogViewPlus knows |
+| 3 | `DEBUG` `INFO` `WARNING` `ERROR` | `%p` | the level names LogViewPlus knows |
 | 4 | duration in ms, or `-` | `%s{Duration}` | own column, sortable |
 | 5 | message | `%m` | may contain spaces |
 | 6 | function | `%c` | mapped to the logger column, so filtering by origin works |
 | 7 | `AppController.cpp(193)` | `%s{Source}` | no spaces, own column |
 | 8 | detail, or `-` | `%S{Detail}` | window titles contain spaces |
 
-`tools/minflyout-sample.log` holds ten representative lines — one per level and one per
+`tools/minflyout-sample.log` holds the header and ten representative lines — one per level and one per
 overload — for the *Testing* tab, so the parser can be checked without running the program.
 
 ## Building
 
-**Visual Studio 2022** – open `MinFlyout.sln`, pick a configuration, F7.
+**Visual Studio 2026** – open `MinFlyout.slnx`, pick a configuration, F7.
+(The XML solution format; Visual Studio 2022 opens it from 17.13 on.)
 
 * Projects: `minflyout` (EXE), `json_tests` (the unit tests for the JSONC parser and the
   monitor selectors and the caption
   geometry, run immediately after building; a failing test breaks the build) and
   `docs` (generates the Doxygen documentation; deliberately not part of the default build).
 * Platforms: `x64` and `ARM64`, each Debug/Release.
-* Output: `build\<platform>\<configuration>\minflyout.exe`.
+* Output: `build\<platform>\<configuration>\minflyout.exe`, with `Debug-Log.cmd`/`.ps1`
+  next to it.
+* Release deploys to `P:\Sachen\SW\Tools\MinFlyout\<platform>` when that folder exists
+  (pCloud): a running MinFlyout is ended first, then the EXE and the log viewer scripts
+  are copied there.
 * Release links the **static CRT** (`/MT`), so the EXE runs without the VC redist.
 * Shared settings live in `MinFlyout.props` – change them there, not in the individual
   projects. `/utf-8` is not optional: the sources contain UTF-8 literals.
