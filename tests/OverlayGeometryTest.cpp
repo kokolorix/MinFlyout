@@ -12,7 +12,9 @@
  *       Once they are back, rename \c main here to
  *       <code>int RunOverlayGeometryTests()</code> and fold it into that target.
  */
+#include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 #include "OverlayGeometry.h"
@@ -148,6 +150,96 @@ void TestTriggerField() {
     CHECK(trigger.width() > 100 && trigger.height() > 100);
 }
 
+/// Zones reaching beyond their monitor, in pixels.
+void TestOverhang() {
+    const mfly::RectI area{0, 0, 1920, 1080};
+
+    // A tenth of the screen to the left: rounded symmetrically, so -10 % is the
+    // mirror image of +10 %.
+    const mfly::RectI left = mfly::PercentToPixels(area, {-10, 0, 60, 100});
+    CHECK(left.left == -192 && left.right == 960);
+
+    const mfly::RectI right = mfly::PercentToPixels(area, {50, 0, 60, 100});
+    CHECK(right.left == 960 && right.right == 2112);
+
+    // A half-pixel on the negative side rounds away from zero, like on the
+    // positive side (truncating "+ 0.5" would give 0 here).
+    const mfly::RectI half = mfly::PercentToPixels(mfly::RectI{0, 0, 200, 100},
+                                                   {-0.5, 0, 50, 100});
+    CHECK(half.left == -1);
+
+    // Two full screens wide, on a monitor left of the primary one.
+    const mfly::RectI wide = mfly::PercentToPixels(mfly::RectI{-1920, 0, 0, 1080},
+                                                   {0, 0, 200, 100});
+    CHECK(wide.left == -1920 && wide.right == 1920);
+}
+
+/// Clipping a tile to the area it is drawn in.
+void TestClippedTo() {
+    const mfly::RectI mini{10, 10, 110, 70};
+
+    CHECK(Same(mfly::ClippedTo(mfly::RectI{20, 20, 50, 50}, mini),
+               (mfly::RectI{20, 20, 50, 50})));
+    CHECK(Same(mfly::ClippedTo(mfly::RectI{-40, 20, 50, 90}, mini),
+               (mfly::RectI{10, 20, 50, 70})));
+    CHECK(Same(mfly::ClippedTo(mfly::RectI{0, 0, 500, 500}, mini), mini));
+
+    // Not overlapping, or only touching: nothing is left.
+    CHECK(mfly::ClippedTo(mfly::RectI{200, 20, 300, 50}, mini).empty());
+    CHECK(mfly::ClippedTo(mfly::RectI{110, 20, 150, 50}, mini).empty());
+
+    // A tile running over the left edge: after gap and clip it touches the
+    // frame on that side and keeps its gap on the others.
+    const mfly::RectI tile = mfly::ClippedTo(
+        mfly::ShrunkBy(mfly::PercentToPixels(mini, {-10, 0, 60, 100}), 2), mini);
+    CHECK(tile.left == mini.left);
+    CHECK(tile.right == 10 + 50 - 2);
+    CHECK(tile.top == mini.top + 2 && tile.bottom == mini.bottom - 2);
+}
+
+/// The limits a zone has to stay within.
+void TestLimitZone() {
+    // An ordinary zone passes untouched.
+    mfly::PercentRect z{50, 0, 50, 100};
+    CHECK(mfly::LimitZone(z));
+    CHECK(z.left == 50 && z.top == 0 && z.width == 50 && z.height == 100);
+
+    // Overhang to the left and to the right is kept as it is.
+    z = {-10, -5, 60, 110};
+    CHECK(mfly::LimitZone(z));
+    CHECK(z.left == -10 && z.top == -5 && z.width == 60 && z.height == 110);
+
+    z = {80, 0, 150, 100};
+    CHECK(mfly::LimitZone(z));
+    CHECK(z.left == 80 && z.width == 150);
+
+    // Out-of-range values are clamped.
+    z = {-1000, 0, 2000, 0};
+    CHECK(mfly::LimitZone(z));
+    CHECK(z.left == mfly::kZoneMinOrigin && z.width == mfly::kZoneMaxSize);
+    CHECK(z.height == mfly::kZoneMinSize);
+
+    z = {150, 0, 50, 100};
+    CHECK(mfly::LimitZone(z));
+    CHECK(z.left == mfly::kZoneMaxOrigin);
+
+    // Entirely beside the monitor - refused, not corrected.
+    z = {-60, 0, 50, 100};
+    CHECK(!mfly::LimitZone(z));
+    z = {0, -100, 50, 100};
+    CHECK(!mfly::LimitZone(z));
+
+    // Exactly the minimum on screen is still accepted.
+    z = {-49, 0, 50, 100};
+    CHECK(mfly::LimitZone(z));
+
+    // NaN counts as the lower bound.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    z = {0, 0, nan, 100};
+    CHECK(mfly::LimitZone(z));
+    CHECK(z.width == mfly::kZoneMinSize && !std::isnan(z.width));
+}
+
 }  // namespace
 
 int main() {
@@ -156,6 +248,9 @@ int main() {
     TestShrunkBy();
     TestSmallestHit();
     TestTriggerField();
+    TestOverhang();
+    TestClippedTo();
+    TestLimitZone();
 
     std::printf("OverlayGeometry: %d checks, %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

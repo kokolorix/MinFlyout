@@ -5,15 +5,18 @@
  */
 #include "OverlayGeometry.h"
 
+#include <algorithm>
+
 namespace mfly {
 namespace {
 
 /**
  * \brief Rounds to the nearest integer, away from zero on a half.
  *
- * Percentages are never negative here, but the helper stays symmetric so a
- * reference area with a negative origin - a monitor left of the primary one -
- * cannot introduce a bias.
+ * Symmetric on purpose: a zone may start at a negative percentage (part of
+ * the window on the screen to the left), and a reference area may have a
+ * negative origin (a monitor left of the primary one). Neither may shift an
+ * edge by a pixel compared with its positive counterpart.
  *
  * \param value Value to round.
  * \return The rounded value.
@@ -21,6 +24,18 @@ namespace {
 int Round(double value) {
     return value < 0.0 ? -static_cast<int>(-value + 0.5)
                        : static_cast<int>(value + 0.5);
+}
+
+/**
+ * \brief std::clamp that maps NaN to the lower bound.
+ * \param value Value to clamp.
+ * \param lo    Lower bound.
+ * \param hi    Upper bound.
+ * \return The clamped value.
+ */
+double ClampOrLow(double value, double lo, double hi) {
+    if (!(value == value)) return lo;  // NaN
+    return std::clamp(value, lo, hi);
 }
 
 }  // namespace
@@ -47,6 +62,25 @@ RectI ShrunkBy(const RectI& r, int gap) {
     if (out.width()  > 2 * gap) { out.left += gap; out.right  -= gap; }
     if (out.height() > 2 * gap) { out.top  += gap; out.bottom -= gap; }
     return out;
+}
+
+RectI ClippedTo(const RectI& r, const RectI& bounds) {
+    RectI out{std::max(r.left, bounds.left), std::max(r.top, bounds.top),
+              std::min(r.right, bounds.right), std::min(r.bottom, bounds.bottom)};
+    return out.empty() ? RectI{} : out;
+}
+
+bool LimitZone(PercentRect& zone) {
+    zone.left   = ClampOrLow(zone.left, kZoneMinOrigin, kZoneMaxOrigin);
+    zone.top    = ClampOrLow(zone.top, kZoneMinOrigin, kZoneMaxOrigin);
+    zone.width  = ClampOrLow(zone.width, kZoneMinSize, kZoneMaxSize);
+    zone.height = ClampOrLow(zone.height, kZoneMinSize, kZoneMaxSize);
+
+    // The upper bound of left/top already keeps kZoneMinOnScreen percent on the
+    // screen towards the right and the bottom; this is the same rule towards
+    // the left and the top.
+    return zone.left + zone.width >= kZoneMinOnScreen &&
+           zone.top + zone.height >= kZoneMinOnScreen;
 }
 
 int SmallestHit(const std::vector<RectI>& rects, int x, int y) {

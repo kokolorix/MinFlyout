@@ -22,36 +22,47 @@
     "zone": {
       "type": "object",
       "additionalProperties": false,
-      "description": "A rectangle in percent of the reference area (see useWorkArea).",
+      "description": "A rectangle in percent of the reference area (see useWorkArea). Values below 0 or beyond 100 reach onto the neighbouring screen; at least 1 % of each axis has to stay on the zone's own monitor.",
       "properties": {
         "left": {
           "type": "number",
-          "minimum": 0,
+          "minimum": -400,
           "maximum": 99,
           "default": 0,
-          "description": "Left edge in percent of the monitor."
+          "description": "Left edge in percent of the monitor. Negative values start on the screen to the left."
         },
         "top": {
           "type": "number",
-          "minimum": 0,
+          "minimum": -400,
           "maximum": 99,
           "default": 0,
-          "description": "Top edge in percent of the monitor."
+          "description": "Top edge in percent of the monitor. Negative values start on the screen above."
         },
         "width": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "maximum": 100,
+          "maximum": 500,
           "default": 50,
-          "description": "Width in percent of the monitor."
+          "description": "Width in percent of the monitor. left + width beyond 100 reaches onto the screen to the right."
         },
         "height": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "maximum": 100,
+          "maximum": 500,
           "default": 100,
-          "description": "Height in percent of the monitor."
+          "description": "Height in percent of the monitor. top + height beyond 100 reaches onto the screen below."
         }
+      }
+    },
+    "triggerField": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A rectangle in percent of the reference area that stays on the screen.",
+      "properties": {
+        "left": { "type": "number", "minimum": 0, "maximum": 99, "default": 40, "description": "Left edge in percent of the monitor." },
+        "top": { "type": "number", "minimum": 0, "maximum": 99, "default": 40, "description": "Top edge in percent of the monitor." },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 100, "default": 20, "description": "Width in percent of the monitor." },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 100, "default": 20, "description": "Height in percent of the monitor." }
       }
     },
     "layout": {
@@ -181,7 +192,7 @@
           "description": "How long the finger must rest in the trigger field before the zones unfold. Too short and merely carrying a window across the middle of the screen opens them."
         },
         "trigger": {
-          "$ref": "#/definitions/zone",
+          "$ref": "#/definitions/triggerField",
           "description": "Where the trigger field sits, in percent of the same reference area the zones use. It is only on screen while a window is actually being dragged."
         },
         "layouts": {

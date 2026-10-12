@@ -54,10 +54,15 @@ constexpr int kEdgeGap = 4;
  * well, so the tile drawn here and the same zone drawn across a whole screen
  * really are the same rectangle.
  *
+ * A zone reaching onto the neighbouring screen is cut off at the edge of the
+ * miniature - only the part on this monitor is drawn and clickable. Since the
+ * cut comes after the gap, such a tile touches the frame of the miniature,
+ * which is how it shows that the window will run over that edge.
+ *
  * \param mini Miniature rectangle in client coordinates.
  * \param zone Zone in percent.
  * \param gap  Gap that keeps the tiles apart.
- * \return The tile rectangle.
+ * \return The tile rectangle; empty if nothing of the zone is on this monitor.
  */
 RECT ZoneRect(const RECT& mini, const Zone& zone, int gap) {
     // RECT holds LONG, RectI holds int - the same width on Win32, so the casts
@@ -65,7 +70,7 @@ RECT ZoneRect(const RECT& mini, const Zone& zone, int gap) {
     const RectI area{static_cast<int>(mini.left), static_cast<int>(mini.top),
                      static_cast<int>(mini.right), static_cast<int>(mini.bottom)};
     const PercentRect part{zone.left, zone.top, zone.width, zone.height};
-    const RectI tile = ShrunkBy(PercentToPixels(area, part), gap);
+    const RectI tile = ClippedTo(ShrunkBy(PercentToPixels(area, part), gap), area);
     return RECT{tile.left, tile.top, tile.right, tile.bottom};
 }
 
@@ -458,7 +463,7 @@ void FlyoutWindow::PaintMonitorRow(HDC dc, size_t rowIndex) {
         for (const Zone& zone : layout.zones) {
             const RECT tile = ZoneRect(mini, zone, Scale(kZoneGap, dpi_));
             const bool hot = static_cast<int>(spot) == hotZone_;
-            if(!hot)
+            if (!hot && !::IsRectEmpty(&tile))
 				{
 					FillRounded(dc, tile, pal.zone, Scale(2, dpi_));
 					FrameRounded(dc, tile, pal.border, Scale(2, dpi_));
@@ -490,7 +495,7 @@ void FlyoutWindow::PaintMonitorRow(HDC dc, size_t rowIndex) {
 		  for (const Zone& zone : layout.zones) {
 			  const RECT tile = ZoneRect(mini, zone, Scale(kZoneGap, dpi_));
 			  const bool hot = static_cast<int>(spot) == hotZone_;
-			  if (hot)
+			  if (hot && !::IsRectEmpty(&tile))
 			  {
 				  FillRounded(dc, tile, pal.accent, Scale(2, dpi_));
 				  FrameRounded(dc, tile, pal.border, Scale(2, dpi_), Scale(2, dpi_));

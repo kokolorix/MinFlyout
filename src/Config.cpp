@@ -12,6 +12,7 @@
 
 #include "CaptionProbe.h"
 #include "Json.h"
+#include "OverlayGeometry.h"
 
 namespace mfly {
 namespace {
@@ -79,7 +80,10 @@ constexpr const char* kTemplate =
     "  // on that monitor.\n"
     "  //\n"
     "  //   name      Caption below the miniature\n"
-    "  //   zones     left / top / width / height, each in percent of the monitor\n"
+    "  //   zones     left / top / width / height, each in percent of the monitor.\n"
+    "  //             Values below 0 or beyond 100 reach onto the neighbouring\n"
+    "  //             screen, e.g. { \"left\": -10, \"width\": 60 } starts a tenth\n"
+    "  //             of a screen to the left of this one.\n"
     "  //   monitors  Which screens the layout is offered on. Omit it for all of\n"
     "  //             them. Allowed entries, mixable in one list:\n"
     "  //               1, 2, ...      the monitor number the flyout caption shows\n"
@@ -350,20 +354,41 @@ void ReadMonitorSelectors(const json::Value& entry, Layout& layout) {
 /**
  * \brief Reads one zone object.
  *
- * The ranges are the ones \ref mfly::ZoneFromWindow clamps a measured zone to,
- * so a line written by Ctrl+Alt+F11 comes back out of the file unchanged.
+ * A zone of a layout may reach beyond its monitor - a negative \c left or a
+ * \c left + \c width above 100 puts part of the window on the neighbouring
+ * screen. The limits are those of \ref mfly::LimitZone, which
+ * \ref mfly::ZoneFromWindow applies to a measured zone as well, so a line
+ * written by Ctrl+Alt+F11 comes back out of the file unchanged. A zone that
+ * does not touch its own monitor at all is dropped.
  *
- * \param[in]  value The object.
- * \param[out] zone  Written only on \c true.
+ * The touch trigger field is read with \p withinArea set: it is something the
+ * finger has to reach on this screen, so it stays inside the reference area
+ * (left/top 0 - 99, width/height 1 - 100).
+ *
+ * \param[in]  value      The object.
+ * \param[out] zone       Written only on \c true.
+ * \param[in]  withinArea \c true confines the zone to its reference area.
  * \return \c false for anything that is not a usable zone.
  */
-bool ReadZone(const json::Value& value, Zone& zone) {
+bool ReadZone(const json::Value& value, Zone& zone, bool withinArea = false) {
     if (!value.is(json::Value::Type::Object)) return false;
 
-    zone.left   = ClampPercent(value.number(L"left", 0.0), 0.0, 99.0);
-    zone.top    = ClampPercent(value.number(L"top", 0.0), 0.0, 99.0);
-    zone.width  = ClampPercent(value.number(L"width", 50.0), 1.0, 100.0);
-    zone.height = ClampPercent(value.number(L"height", 100.0), 1.0, 100.0);
+    if (withinArea) {
+        zone.left   = ClampPercent(value.number(L"left", 0.0), 0.0, 99.0);
+        zone.top    = ClampPercent(value.number(L"top", 0.0), 0.0, 99.0);
+        zone.width  = ClampPercent(value.number(L"width", 50.0), 1.0, 100.0);
+        zone.height = ClampPercent(value.number(L"height", 100.0), 1.0, 100.0);
+        return zone.valid();
+    }
+
+    PercentRect part{value.number(L"left", 0.0), value.number(L"top", 0.0),
+                     value.number(L"width", 50.0), value.number(L"height", 100.0)};
+    if (!LimitZone(part)) return false;
+
+    zone.left = part.left;
+    zone.top = part.top;
+    zone.width = part.width;
+    zone.height = part.height;
     return zone.valid();
 }
 
@@ -426,7 +451,7 @@ bool ReadTouch(const json::Value& root, Config& out) {
 
     if (const json::Value* trigger = touch->find(L"trigger")) {
         Zone zone;
-        if (!ReadZone(*trigger, zone)) {
+        if (!ReadZone(*trigger, zone, true)) {
             out.error = L"\"touch.trigger\" must be an object with left, top, "
                         L"width and height.";
             return false;

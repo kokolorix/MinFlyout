@@ -11,6 +11,7 @@
 #include <map>
 
 #include "Log.h"
+#include "OverlayGeometry.h"
 
 namespace mfly {
 namespace {
@@ -65,6 +66,8 @@ std::wstring Percent(double value) {
 
     while (!text.empty() && text.back() == L'0') text.pop_back();
     if (!text.empty() && text.back() == L'.') text.pop_back();
+    // A window a fraction of a pixel left of the edge rounds to "-0.00".
+    if (text == L"-0") text = L"0";
     return text;
 }
 
@@ -171,10 +174,22 @@ bool ApplyZone(HWND window, const Zone& zone, HMONITOR monitor, bool useWorkArea
         ::ShowWindow(window, SW_RESTORE);
     }
 
-    const int width = std::max(1, static_cast<int>(areaWidth * zone.width / 100.0 + 0.5));
-    const int height = std::max(1, static_cast<int>(areaHeight * zone.height / 100.0 + 0.5));
-    const int originX = area.left + static_cast<int>(areaWidth * zone.left / 100.0 + 0.5);
-    const int originY = area.top + static_cast<int>(areaHeight * zone.top / 100.0 + 0.5);
+    // The same arithmetic the flyout and the overlay draw their tiles with.
+    // It rounds symmetrically, which matters now that a zone may start at a
+    // negative percentage on the screen to the left - truncating "+ 0.5" would
+    // shift such an edge by a pixel.
+    const RectI target = PercentToPixels(
+        RectI{static_cast<int>(area.left), static_cast<int>(area.top),
+              static_cast<int>(area.right), static_cast<int>(area.bottom)},
+        PercentRect{zone.left, zone.top, zone.width, zone.height});
+    if (areaWidth <= 0 || areaHeight <= 0 || target.empty()) {
+        WRITE_WARNING_LOG(L"Zone maps to an empty rectangle", log::Describe(window));
+        return false;
+    }
+    const int width = std::max(1, target.width());
+    const int height = std::max(1, target.height());
+    const int originX = target.left;
+    const int originY = target.top;
 
     // Align the visible edges flush: compensate for the invisible border.
     const RECT pad = InvisibleBorders(window);
@@ -224,12 +239,25 @@ bool ZoneFromWindow(HWND window, bool useWorkArea, Zone& zone, HMONITOR* monitor
     const double areaHeight = static_cast<double>(area.bottom - area.top);
     if (areaWidth <= 0.0 || areaHeight <= 0.0) return false;
 
-    // Same ranges the parser clamps a loaded zone to, so a captured line comes
-    // back out of the file exactly as it went in.
-    zone.left   = std::clamp((frame.left - area.left) * 100.0 / areaWidth, 0.0, 99.0);
-    zone.top    = std::clamp((frame.top - area.top) * 100.0 / areaHeight, 0.0, 99.0);
-    zone.width  = std::clamp((frame.right - frame.left) * 100.0 / areaWidth, 1.0, 100.0);
-    zone.height = std::clamp((frame.bottom - frame.top) * 100.0 / areaHeight, 1.0, 100.0);
+    // Same limits the parser applies to a loaded zone, so a captured line comes
+    // back out of the file exactly as it went in. A window hanging over the
+    // edge of its screen is measured as it is - negative or beyond 100 - since
+    // the file can express that now.
+    PercentRect part{(frame.left - area.left) * 100.0 / areaWidth,
+                     (frame.top - area.top) * 100.0 / areaHeight,
+                     (frame.right - frame.left) * 100.0 / areaWidth,
+                     (frame.bottom - frame.top) * 100.0 / areaHeight};
+    if (!LimitZone(part)) {
+        // Only possible with useWorkArea: the window sits entirely on the
+        // taskbar strip of the monitor it belongs to.
+        WRITE_WARNING_LOG(L"Zone not captured: the window lies outside the reference area",
+                          log::Describe(window));
+        return false;
+    }
+    zone.left = part.left;
+    zone.top = part.top;
+    zone.width = part.width;
+    zone.height = part.height;
 
     if (monitor) *monitor = mon;
 

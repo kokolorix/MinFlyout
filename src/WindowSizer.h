@@ -178,6 +178,12 @@ void ForgetDeadResizeState();
  * explicitly, a click in the flyout can move a window to another screen in one
  * step. A maximized or minimized window is restored first.
  *
+ * Values below 0 or beyond 100 are taken literally: the window then reaches
+ * onto the neighbouring screen (or off the desktop, where there is none).
+ * Windows assigns a window to the monitor holding the larger part of it, so a
+ * per-monitor DPI aware application whose larger part ends up on a screen with
+ * a different scale factor may resize itself afterwards.
+ *
  * The visible edges are placed flush: since Windows Vista the window rectangle
  * is wider than the visible border because the drop shadow counts towards it.
  * The difference comes from \c DWMWA_EXTENDED_FRAME_BOUNDS and is factored out,
@@ -208,16 +214,18 @@ bool IsResizable(HWND window);
  * so the invisible shadow border cancels out on both ways: applying a captured
  * zone puts the window back where it was measured.
  *
- * The result is clamped to the ranges the parser in Config.cpp enforces
- * (left/top 0-99, width/height 1-100). A window hanging over an edge of its
- * monitor would otherwise produce a line that the next load silently corrects.
+ * A window hanging over an edge of its monitor yields values below 0 or
+ * beyond 100, exactly as a zone in the file may have them. The result is
+ * limited by \ref LimitZone, the same function the parser in Config.cpp uses,
+ * so the line comes back out of the file unchanged.
  *
  * \param[in]  window      Window to measure.
  * \param[in]  useWorkArea \c true bases the percentages on the work area.
  * \param[out] zone        Written only when \c true is returned.
  * \param[out] monitor     Monitor the window was measured against; may be \c nullptr.
- * \return \c false for an invalid or minimized window, or when the monitor
- *         cannot be determined.
+ * \return \c false for an invalid or minimized window, when the monitor
+ *         cannot be determined, or when the window does not overlap the
+ *         reference area of its monitor at all.
  */
 bool ZoneFromWindow(HWND window, bool useWorkArea, Zone& zone,
                     HMONITOR* monitor = nullptr);

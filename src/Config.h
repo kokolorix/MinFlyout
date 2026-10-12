@@ -10,17 +10,22 @@
 namespace mfly {
 
 /**
- * \brief One target area inside a monitor, in percent.
+ * \brief One target area of a monitor, in percent.
  *
  * The values are percentages of the work area (or of the full monitor area,
  * see Config::useWorkArea) of the monitor the zone is drawn on. A zone is what
  * the user finally clicks in the flyout.
+ *
+ * A zone may reach beyond its monitor: a negative \c left / \c top, or an
+ * edge beyond 100, extends the window onto the neighbouring screen. Part of
+ * it always stays on its own monitor; the limits are those of
+ * \ref mfly::LimitZone.
  */
 struct Zone {
-    double left = 0.0;    ///< Left edge in percent (0 - 100).
-    double top = 0.0;     ///< Top edge in percent (0 - 100).
-    double width = 50.0;  ///< Width in percent (1 - 100).
-    double height = 100.0;///< Height in percent (1 - 100).
+    double left = 0.0;    ///< Left edge in percent (-400 - 99).
+    double top = 0.0;     ///< Top edge in percent (-400 - 99).
+    double width = 50.0;  ///< Width in percent (1 - 500).
+    double height = 100.0;///< Height in percent (1 - 500).
 
     /// \return \c true if the zone has a usable size.
     bool valid() const { return width > 0.0 && height > 0.0; }
@@ -87,7 +92,9 @@ struct TouchConfig {
      * \brief Where the trigger field sits, in percent of the reference area.
      *
      * The default is a fifth of the screen in its middle. It only exists while
-     * a window is actually being dragged, so it may be generous.
+     * a window is actually being dragged, so it may be generous. Unlike the
+     * zones of a layout it stays inside the reference area - the finger has to
+     * reach it on this screen.
      */
     Zone trigger{40.0, 40.0, 20.0, 20.0};
 

@@ -141,7 +141,8 @@
  *
  * A \ref mfly::Layout is drawn as a miniature of the monitor, each of its
  * \ref mfly::Zone entries as a tile inside it. All four zone values are
- * percentages of the monitor the miniature stands for.
+ * percentages of the monitor the miniature stands for. Values below 0 or
+ * beyond 100 reach onto the neighbouring screen (see \ref config_zone).
  *
  * Zones are meant to tile the screen without overlapping, the way the Windows
  * snap layouts do - but nothing enforces it. Where zones do overlap, the

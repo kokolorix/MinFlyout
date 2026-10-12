@@ -214,7 +214,10 @@ void ZoneOverlay::MeasureZones() {
 
     const int gap = Scale(kTileGap, dpi_);
     for (const Zone& zone : layout_.zones) {
-        const RectI tile = ShrunkBy(PercentToPixels(area_, AsPercent(zone)), gap);
+        // A zone reaching onto the neighbouring screen can only be a drop
+        // target on this one; the window still lands on the full zone.
+        const RectI tile =
+            ClippedTo(ShrunkBy(PercentToPixels(area_, AsPercent(zone)), gap), area_);
         tiles_.push_back(tile);
     }
 }
@@ -336,8 +339,8 @@ void ZoneOverlay::PaintTrigger(HDC dc, const Palette& pal) {
 
         const int gap = Scale(kMiniGap, dpi_);
         for (const Zone& zone : layout_.zones) {
-            const RECT tile =
-                AsRect(ShrunkBy(PercentToPixels(miniArea, AsPercent(zone)), gap));
+            const RECT tile = AsRect(ClippedTo(
+                ShrunkBy(PercentToPixels(miniArea, AsPercent(zone)), gap), miniArea));
             if (tile.right <= tile.left || tile.bottom <= tile.top) continue;
             FillRounded(dc, tile, pal.zone, Scale(3, dpi_));
         }

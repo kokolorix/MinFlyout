@@ -99,14 +99,34 @@
  *
  * | Field | Range | Default | Meaning |
  * |---|---|---|---|
- * | \c left   | 0 - 99  | \c 0   | Left edge in percent. |
- * | \c top    | 0 - 99  | \c 0   | Top edge in percent. |
- * | \c width  | 1 - 100 | \c 50  | Width in percent. |
- * | \c height | 1 - 100 | \c 100 | Height in percent. |
+ * | \c left   | -400 - 99 | \c 0   | Left edge in percent. |
+ * | \c top    | -400 - 99 | \c 0   | Top edge in percent. |
+ * | \c width  | 1 - 500   | \c 50  | Width in percent. |
+ * | \c height | 1 - 500   | \c 100 | Height in percent. |
  *
- * The ranges are exactly the ones \ref mfly::ZoneFromWindow clamps a measured
- * zone to, so a line produced by Ctrl+Alt+F11 comes back out of the file as the
- * window it was taken from.
+ * A zone does not have to stay on its monitor. A negative \c left or \c top,
+ * or a \c left + \c width (\c top + \c height) beyond 100, lets the window
+ * reach onto the neighbouring screen - <code>{ "left": -10, "top": 0,
+ * "width": 60, "height": 100 }</code> starts a tenth of a screen width to the
+ * left of this monitor. The percentages always refer to the monitor the zone is
+ * picked on, so the overhang is measured in *its* width and height, not in
+ * those of the neighbour. At least 1 % of each axis has to stay on the zone's
+ * own monitor; a zone lying entirely beside it is dropped. Where there is no
+ * neighbouring screen, the overhanging part simply ends up off the desktop.
+ *
+ * In the miniature such a tile is cut off at the edge and touches the frame
+ * there; the touch overlay likewise only shows the part on this screen. Windows
+ * assigns a window to the monitor holding the larger part of it - a per-monitor
+ * DPI aware application whose larger part lands on a screen with a different
+ * scale factor may therefore resize itself after being placed.
+ *
+ * The limits are exactly the ones \ref mfly::ZoneFromWindow applies to a
+ * measured zone (both go through \ref mfly::LimitZone), so a line produced by
+ * Ctrl+Alt+F11 comes back out of the file as the window it was taken from -
+ * including a window hanging over the edge of its screen.
+ *
+ * The touch trigger field (\c touch.trigger) is the one exception: it has to be
+ * reachable on this screen and stays within 0 - 99 / 1 - 100.
  *
  * Zones are meant to tile the area without overlapping, the way the Windows snap
  * layouts do - but nothing enforces it. Where they do overlap, the smallest one

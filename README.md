@@ -86,6 +86,17 @@ The format is JSONC – comments and trailing commas are allowed:
 A **layout** is drawn as a miniature of the monitor, each of its **zones** as a tile inside
 it. All four zone values are percentages of the monitor the miniature stands for.
 
+A zone may reach beyond its monitor: negative values, or `left + width` / `top + height`
+beyond 100, put part of the window on the neighbouring screen —
+`{ "left": -10, "top": 0, "width": 60, "height": 100 }` starts a tenth of a screen to the left.
+Allowed are `left`/`top` −400…99 and `width`/`height` 1…500; at least 1 % of each axis has to
+stay on the zone's own monitor. The overhang is measured in the size of *that* monitor, not of
+the neighbour. The miniature only draws the part on its own screen; such a tile touches the
+frame of the miniature on the side where it runs over. Note that Windows assigns a window to
+the monitor holding its larger part — a DPI-aware application landing mostly on a screen with
+a different scale factor may resize itself afterwards. The touch trigger field stays on screen
+(0…99 / 1…100).
+
 | Field | Meaning |
 |---|---|
 | `name` | caption below the miniature |
@@ -147,9 +158,10 @@ shadow border cancels out and pasting the line back reproduces the window exactl
 reference area follows `useWorkArea`, so the numbers mean the same thing they do everywhere
 else in the file.
 
-Values are rounded to two decimals with trailing zeros dropped, and clamped to the ranges the
-parser accepts (`left`/`top` 0–99, `width`/`height` 1–100) — a window hanging over the edge of
-its screen would otherwise produce a line the next load silently corrects.
+Values are rounded to two decimals with trailing zeros dropped, and limited to the ranges the
+parser accepts (`left`/`top` −400…99, `width`/`height` 1…500). A window hanging over the edge
+of its screen is captured as it is, with values below 0 or beyond 100, so pasting the line
+back reproduces the overhang.
 
 ### Dragging a window into a zone by finger
 
