@@ -25,3 +25,7 @@ enc_temp_folder/1b27d55c9d4f942fe06c574282574535/config.jsonc
 enc_temp_folder/
 
 *.scor*
+
+# Written by tools/GenerateVersion.ps1 before every build
+res/Version.h
+Version.doxyfile
