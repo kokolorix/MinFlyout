@@ -21,6 +21,9 @@
     <ClCompile Include="src\main.cpp">
       <Filter>App</Filter>
     </ClCompile>
+    <ClCompile Include="src\AboutDialog.cpp">
+      <Filter>App</Filter>
+    </ClCompile>
     <ClCompile Include="src\AppController.cpp">
       <Filter>App</Filter>
     </ClCompile>
@@ -92,6 +95,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\AboutDialog.h">
+      <Filter>App</Filter>
+    </ClInclude>
     <ClInclude Include="src\AppController.h">
       <Filter>App</Filter>
     </ClInclude>

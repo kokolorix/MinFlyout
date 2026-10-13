@@ -33,8 +33,9 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <!-- ole32/uuid: SHGetKnownFolderPath and FOLDERID_RoamingAppData.
+           comctl32: list view and tooltip of the About dialog.
            DPI and DWM functions are resolved by the code at run time. -->
-      <AdditionalDependencies>user32.lib;gdi32.lib;shell32.lib;advapi32.lib;ole32.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>user32.lib;gdi32.lib;shell32.lib;advapi32.lib;ole32.lib;uuid.lib;comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 

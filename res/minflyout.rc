@@ -47,3 +47,25 @@ BEGIN
         VALUE "Translation", 0x409, 1200
     END
 END
+
+// About dialog, see src/AboutDialog.cpp. The list view gets its report
+// styles in code, so this file needs no commctrl.h.
+IDD_ABOUT DIALOGEX 0, 0, 300, 316
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+EXSTYLE WS_EX_APPWINDOW
+CAPTION "About MinFlyout"
+FONT 8, "MS Shell Dlg", 0, 0, 0x1
+BEGIN
+    ICON            IDI_APPICON,IDC_STATIC,14,14,21,20
+    LTEXT           "MinFlyout",IDC_ABOUT_VERSION,42,14,244,8,SS_NOPREFIX
+    LTEXT           "Copyright (c) 2026",IDC_STATIC,42,26,244,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,14,42,272,1
+    LTEXT           "commit",IDC_STATIC,14,52,26,8
+    LTEXT           "",IDC_ABOUT_COMMIT,44,52,184,8,SS_NOPREFIX | SS_NOTIFY
+    PUSHBUTTON      "&Copy",IDC_ABOUT_COPY,238,49,48,14
+    LTEXT           "",IDC_ABOUT_BUILT,14,66,272,8,SS_NOPREFIX
+    LTEXT           "",IDC_ABOUT_DIRTY,14,78,272,8,SS_NOPREFIX
+    LTEXT           "Keyboard and mouse",IDC_STATIC,14,94,272,8
+    CONTROL         "",IDC_ABOUT_SHORTCUTS,"SysListView32",WS_BORDER | WS_TABSTOP,14,105,272,184
+    DEFPUSHBUTTON   "OK",IDOK,236,296,50,14,WS_GROUP
+END
