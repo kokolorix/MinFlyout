@@ -52,6 +52,7 @@
  * | \c useWorkArea | boolean | \c true | \c true bases every percentage on the work area, so a zone of 100 % height stops above the taskbar. \c false uses the full monitor area. Applies to the flyout, to the touch overlay and to what Ctrl+Alt+F11 measures, so the three always mean the same thing. (\ref mfly::Config::useWorkArea) |
  * | \c showAllMonitors | boolean | \c true | \c true draws one row per screen, so one click can move a window to another monitor. \c false shows only the screen the window is on. (\ref mfly::Config::showAllMonitors) |
  * | \c uiScale | number, 0.75 - 3 | \c 1.0 | Size factor of the flyout, on top of the DPI scaling; the details are in \ref config_uiscale below. (\ref mfly::Config::uiScale) |
+ * | \c openHotkey | string | \c "Ctrl+Alt+Z" | Opens the flyout for the foreground window from the keyboard; see \ref config_hotkey below. \c "" switches it off. (\ref mfly::Config::openHotkey) |
  * | \c buttonDetection | \c "auto", \c "hittest", \c "computed" | \c "auto" | How the minimize button is located; \ref main_detection walks the three. An unknown value is a configuration error and leaves the default in place. (\ref mfly::Config::buttonDetection) |
  * | \c traceDetection | boolean | \c false | One log line per gate of the detection, so a mouse movement that never reaches the probe can be followed to where it died. One line per change, not per movement, and only in a build with the logging macros compiled in. (\ref mfly::Config::traceDetection) |
  * | \c logToFile | boolean | \c false | Also write the log to \c \%APPDATA%\\MinFlyout\\minflyout.log, UTF-8 with BOM, rotated to \c .log.1 at 1 MB. The debugger output is always written; this only adds the file, and only where logging is compiled in. (\ref mfly::Config::logToFile) |
@@ -91,6 +92,49 @@
  * The touch overlay has no such setting: its trigger field and its zones are
  * given in percent of the screen and are therefore already as large as the
  * screen is.
+ *
+ * \section config_hotkey Opening the flyout from the keyboard
+ *
+ * \c "openHotkey" is the keyboard route to what the hover opens. Pressed, it
+ * opens the flyout for the foreground window, below its minimize button - the
+ * button is located the way the detection computes it when a window does not
+ * answer the hit test (\ref mfly::ComputeMinimizeButton). A window without a
+ * minimize button gets the flyout below the middle of its title bar.
+ *
+ * Such a flyout ignores where the pointer is. It closes on the same keys again,
+ * on Esc, on a click outside it, when a window is chosen in it, and when
+ * another window comes to the front. While detection is paused the hotkey does
+ * nothing.
+ *
+ * The tray menu offers the same as *Open flyout for the active window*, with
+ * the hotkey shown beside it - reachable without a mouse through Win+B, the
+ * arrow keys and Enter, and the way out when the combination belongs to some
+ * other program. Opening the tray menu puts the taskbar in front, so the entry
+ * acts on the window that was in front before (\ref mfly::AppController::UserWindow).
+ *
+ * Inside the flyout, Tab and Shift+Tab move from monitor to monitor (the
+ * resize toolbar and the text items are stops as well), the arrow keys move
+ * within one, Home and End jump to its ends, Enter and Space choose. The
+ * details are at \ref mfly::FlyoutWindow::HandleKey and
+ * \ref mfly::HookThread::SetKeyNavigation.
+ *
+ * Spelling (\ref mfly::ParseHotkey): parts joined by \c '+', case and blanks
+ * do not matter.
+ *
+ * | Part | Allowed |
+ * |---|---|
+ * | Modifiers | \c Ctrl (\c Strg), \c Alt, \c Shift (\c Umschalt), \c Win |
+ * | Keys | \c A - \c Z, \c 0 - \c 9, \c F1 - \c F24, \c Space, \c Enter, \c Tab, \c Backspace, \c Insert, \c Delete, \c Home, \c End, \c PageUp, \c PageDown, \c Up, \c Down, \c Left, \c Right, \c Pause |
+ *
+ * A key other than F1 - F24 needs Ctrl, Alt or Win - \c "Shift+A" would
+ * swallow every capital A. \c Esc is refused, it is what closes the flyout.
+ * An unknown spelling is a configuration error. A combination that another
+ * program already holds is reported in a balloon after a reload and in the
+ * log; the tray menu entry keeps working.
+ *
+ * On keyboard layouts with AltGr, Ctrl+Alt+letter is the same as AltGr+letter.
+ * Z carries no character on the German, Swiss or French layouts; on a layout
+ * where it does (Polish ż), pick another key.
  *
  * \section config_zone The zone object
  *

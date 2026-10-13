@@ -60,6 +60,7 @@ The format is JSONC – comments and trailing commas are allowed:
   "useWorkArea": true,       // compute percentages without the taskbar
   "showAllMonitors": true,   // offer every screen, not just the current one
   "uiScale": 1.0,            // size factor of the flyout, on top of the DPI scaling
+  "openHotkey": "Ctrl+Alt+Z", // open the flyout for the active window; "" = off
   "buttonDetection": "auto", // ask the window, compute when it stays silent
 
   "layouts": [
@@ -136,6 +137,47 @@ of the screen, so they are already as large as the screen is.
 If the `layouts` section is missing entirely, five built-in layouts are used (halves, thirds,
 large + two, quarters, full screen). An explicitly empty list `[]` hides the miniature area
 and leaves only the text items.
+
+### Opening the flyout from the keyboard
+
+**Ctrl+Alt+Z** opens the flyout for the active window, below its minimize button — as if the
+pointer had rested there. The button is located the way the detection computes it for windows
+that do not answer the hit test; a window without a minimize button gets the flyout below the
+middle of its title bar. The same keys again, `ESC`, a click elsewhere or switching to another
+window close it; where the pointer happens to be does not matter.
+
+The combination is set with `"openHotkey"`: modifiers `Ctrl`, `Alt`, `Shift`, `Win`, keys
+`A`–`Z`, `0`–`9`, `F1`–`F24`, `Space`, `Enter`, `Tab`, `Insert`, `Delete`, `Home`, `End`,
+`PageUp`, `PageDown` and the arrows (German names like `Strg`, `Leertaste` or `Entf` work
+too). Anything but a function key needs Ctrl, Alt or Win, and `Esc` is refused. `""` switches
+the hotkey off. If another program already holds the combination, a balloon says so after the
+reload — the tray menu entry *Open flyout for the active window* keeps working, and through
+**Win+B**, the arrow keys and Enter it needs no mouse either. Opening the tray menu puts the
+taskbar in front, so the menu acts on the window that was in front before; MinFlyout keeps
+track of it through a WinEvent hook on `EVENT_SYSTEM_FOREGROUND`.
+
+### Moving through the flyout with the keyboard
+
+The flyout never takes the focus — the window below keeps it — so its keys come through the
+keyboard hook that is installed while it is open:
+
+| Key | Effect |
+|---|---|
+| `Tab` / `Shift+Tab` | next / previous monitor; the resize toolbar and the text items are stops too, and it wraps around |
+| `→` `↓` / `←` `↑` | next / previous element within that stop, wrapping around |
+| `Home` / `End` | first / last element |
+| `Enter` / `Space` | choose the highlighted element, exactly as a click would |
+| `Esc` | close |
+
+Opened from the keyboard, the first zone of the monitor the window is on is highlighted right
+away. Opened by hovering, nothing is: the first arrow or `Tab` shows where the focus is, and
+only from then on do `Enter` and `Space` belong to the flyout — so one that merely popped up
+under a resting pointer does not eat the Enter meant for the window below. `Tab` from one
+monitor to the next keeps the position: the left half on screen 1 becomes the left half on
+screen 2. Keyboard focus and mouse hover are one highlight; whichever moved last wins.
+
+Keys with `Ctrl`, `Alt` or `Win` held are left alone, so `Alt+Tab` and the resize hotkeys keep
+working — let go of `Ctrl+Alt` after opening before using the arrows.
 
 ### Writing a zone down without counting pixels
 
@@ -568,6 +610,8 @@ it off — worth knowing if `%APPDATA%` is redirected to a share that reports no
 | `src/ItemRegistry.*` | provider registry, merging of the items |
 | `src/BuiltinProviders.cpp` | the two providers: core actions and window groups |
 | `src/Config.*` | loading/creating `config.jsonc`, schema, default values |
+| `src/AboutDialog.*` | the About dialog: version, commit, every key and gesture |
+| `src/Hotkey.*` | `"Ctrl+Alt+Z"` to modifier mask and key code and back; free of Windows dependencies |
 | `src/ConfigWatcher.*` | watches the folder, debounces, posts one message per save |
 | `src/SettingsBackup.*` | the settings share and the Beyond Compare lookup, probed off the UI thread |
 | `src/Json.*` | JSONC parser (comments, trailing commas), no third-party library |
@@ -684,6 +728,15 @@ overload — for the *Testing* tab, so the parser can be checked without running
 * Shared settings live in `MinFlyout.props` – change them there, not in the individual
   projects. `/utf-8` is not optional: the sources contain UTF-8 literals.
 
+**Version information**, as in ClipWatch: before every build `tools\GenerateVersion.ps1`
+writes `res\Version.h` from `Version.txt` (major.minor.patch) and git — commit count as the
+fourth field, the abbreviated and full hash, the branch and whether the working tree had
+uncommitted changes. The version resource, the start-up log line, the Ctrl+Alt+F12 report and
+the About dialog (tray menu) all read it; `Version.doxyfile` puts the same into the header of
+the Doxygen documentation. Both files are generated and ignored by git; the script only
+rewrites a file when something changed. In Visual Studio it is the pre-build
+event, in CMake the `version` target.
+
 **CMake** (alternative, same sources):
 
 ```
@@ -702,8 +755,12 @@ cmake --build build
 
 ## Documentation
 
-`doxygen` in the project directory generates `build/doxygen-html/index.html` (or build the
-`docs` project in Visual Studio). Besides the API it carries two hand-written pages:
+`doxygen MinFlyout.dox` in the project directory generates `build/doxygen-html/index.html`
+(or build the `docs` project in Visual Studio, or the CMake target `docs`). The version in the
+page header comes from `Version.doxyfile`, which `MinFlyout.dox` pulls in by `@INCLUDE` and
+`tools\GenerateVersion.ps1` writes — the `docs` project and every build of `minflyout` run it
+first. Calling doxygen by hand in a fresh clone therefore needs one build or one run of the
+script beforehand. Besides the API it carries two hand-written pages:
 `docs/mainpage.dox` explains the mechanisms, and `docs/configuration.dox` is the complete
 configuration reference — every key with its default and its range, plus example files
 for a small laptop, two screens of different shape, a tablet that turns, and a session
@@ -716,7 +773,9 @@ and dependency graphs.
 
 ## Usage
 
-* Hold the mouse over the minimize button → the flyout unfolds below it.
+* Hold the mouse over the minimize button → the flyout unfolds below it. **Ctrl+Alt+Z** opens
+  it for the active window from the keyboard, see
+  [Opening the flyout from the keyboard](#opening-the-flyout-from-the-keyboard).
 * With a finger: drag a window by its title bar, rest it in the field that appears,
   and drop it on a zone. See [Dragging a window into a zone by
   finger](#dragging-a-window-into-a-zone-by-finger).
@@ -725,6 +784,8 @@ and dependency graphs.
   for screen and position together.
 * Below the miniatures the text items follow (minimize, notification area, always on top, …).
 * Leaving it, clicking elsewhere or `ESC` closes it again.
+* `Tab` moves from monitor to monitor, the arrow keys within one, `Enter` chooses — see
+  [Moving through the flyout with the keyboard](#moving-through-the-flyout-with-the-keyboard).
 * Clicking the button itself minimizes as usual.
 * A window without a sizing border (`WS_THICKFRAME`) cannot be tiled; for those the miniature
   area is omitted and only the text items appear.
@@ -739,7 +800,8 @@ and dependency graphs.
 * Tray icon: **double click reloads the configuration** (the default action, shown in bold in
   the menu). Right click opens the menu: *Paused*, *Restore all stashed windows*,
   *Open configuration*, *Reload configuration*, *Copy zone of the active window*,
-  *Open diagnosis file*, *Exit* — plus *Back up configuration* and *Compare with the
+  *Open flyout for the active window*,
+  *Open diagnosis file*, *About MinFlyout*, *Exit* — plus *Back up configuration* and *Compare with the
   backup in Beyond Compare* where the settings share and the comparer are there, see
   [Carrying the configuration between machines](#carrying-the-configuration-between-machines).
 

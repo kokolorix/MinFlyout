@@ -114,6 +114,7 @@
  *   "useWorkArea": true,       // compute percentages without the taskbar
  *   "showAllMonitors": true,   // offer every screen, not just the current one
  *   "uiScale": 1.0,            // size factor of the flyout (see page_config)
+ *   "openHotkey": "Ctrl+Alt+Z", // open the flyout for the active window
  *   "buttonDetection": "auto", // ask the window, compute when it stays silent
  *
  *   "layouts": [
