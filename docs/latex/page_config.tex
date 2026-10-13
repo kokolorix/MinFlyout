@@ -1,0 +1,279 @@
+\doxysection{Configuration reference }
+\hypertarget{page_config}{}\label{page_config}\index{Configuration reference@{Configuration reference}}
+Every key Min\+Flyout understands, what it does, what it defaults to and what happens at the edges of its range. \doxysectlink{page_config_config_examples}{Examples}{1} follows with complete files for a small laptop, two screens of different shape, a tablet that turns, and a session spent chasing an app that stays undetected.
+
+The mechanisms behind the settings are described on the main page: \doxysectlink{index_main_capture}{Writing a zone down without counting pixels}{2} writes a zone down without counting pixels, \doxysectlink{index_main_monitor_layouts}{Layouts for one screen}{2} explains the monitor selectors, \doxysectlink{index_main_detection}{How the button is located}{2} what {\ttfamily "{}button\+Detection"{}} chooses between, and \doxysectlink{index_main_diagnosis}{When a window stays undetected}{2} what to do when a window stays undetected.\hypertarget{page_config_config_file}{}\doxysubsection{\texorpdfstring{The file}{The file}}\label{page_config_config_file}
+On first start {\ttfamily \%APPDATA\%\textbackslash{}Min\+Flyout\textbackslash{}config.\+jsonc} is created with a commented template -\/ the same text mfly::\+\+Config\+Store::\+\+Reload writes, so the template and the defaults documented here cannot drift apart.
+
+The format is JSONC, read by the parser in Json.\+h: line comments ({\ttfamily /\+/}), block comments and trailing commas are allowed.
+
+{\ttfamily res/\+config.\+schema.\+json} describes the whole file, so an editor can complete the keys, show these descriptions on hover and flag a typo such as {\ttfamily show\+All\+Monitor}. In VS Code, either add an entry to {\ttfamily json.\+schemas} in the {\bfseries{user}} settings -\/ appending to the array rather than replacing it -\/ with {\ttfamily file\+Match} set to {\ttfamily \&\#42;\&\#42;\&\#47;Min\+Flyout/\+config.\+jsonc} and {\ttfamily url} to the full path of {\ttfamily res/\+config.\+schema.\+json}; or put {\ttfamily "{}\$schema"{}: "{}d:\+/\+\+Projects/\+\+Min\+Flyout/\+res/\+config.\+schema.\+json"{}} as the first key of the file itself. Min\+Flyout ignores keys it does not know, so the file keeps working either way. Forward slashes are accepted in that path and save the escaping.
+
+The trailing commas of the template stay flagged with a warning: the JSONC mode accepts them, but VS Code marks them anyway and offers no setting for that single diagnostic -\/ the only switch is {\ttfamily "{}json.\+validate.\+enable"{}}: {\ttfamily false}, which would also disable the schema.
+
+{\bfseries{Saving applies the changes.}} mfly::\+\+Config\+Watcher watches the folder, debounces for 300 ms and posts one message per save; a balloon on the tray icon confirms the reload. The tray menu entry {\itshape Reload configuration} does the same by hand, and {\ttfamily "{}watch\+Config"{}}: {\ttfamily false} turns the watching off.\hypertarget{page_config_config_top}{}\doxysubsection{\texorpdfstring{Top-\/level keys}{Top-\/level keys}}\label{page_config_config_top}
+
+\begin{DoxyTable}{4}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Key  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Type  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Default  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Meaning  \\
+{\ttfamily hover\+Delay\+Ms}  &integer, 0 -\/ 5000  &{\ttfamily 350}  &How long the pointer must rest on the minimize button before the flyout opens. {\ttfamily 0} opens on the first movement over it, which makes crossing the title bar noisy. (mfly::\+\+Config::\+hover\+Delay\+Ms)  \\
+{\ttfamily close\+Grace\+Ms}  &integer, 0 -\/ 5000  &{\ttfamily 260}  &How long the flyout stays after the pointer has left it and the button. It survives the trip between the two regardless -\/ a corridor spanning both is treated as inside. (mfly::\+\+Config::\+close\+Grace\+Ms)  \\
+{\ttfamily show\+Builtin\+Items}  &boolean  &{\ttfamily true}  &Show the text items below the miniatures. {\ttfamily false} leaves the layouts alone. (mfly::\+\+Config::\+show\+Builtin\+Items)  \\
+{\ttfamily use\+Work\+Area}  &boolean  &{\ttfamily true}  &{\ttfamily true} bases every percentage on the work area, so a zone of 100 \% height stops above the taskbar. {\ttfamily false} uses the full monitor area. Applies to the flyout, to the touch overlay and to what Ctrl+\+Alt+\+F11 measures, so the three always mean the same thing. (mfly::\+\+Config::\+use\+Work\+Area)  \\
+{\ttfamily show\+All\+Monitors}  &boolean  &{\ttfamily true}  &{\ttfamily true} draws one row per screen, so one click can move a window to another monitor. {\ttfamily false} shows only the screen the window is on. (mfly::\+\+Config::\+show\+All\+Monitors)  \\
+{\ttfamily ui\+Scale}  &number, 0.\+75 -\/ 3  &{\ttfamily 1.\+0}  &Size factor of the flyout, on top of the DPI scaling; the details are in \doxysectlink{page_config_config_uiscale}{Making the flyout bigger}{1} below. (mfly::\+\+Config::\+ui\+Scale)  \\
+{\ttfamily open\+Hotkey}  &string  &{\ttfamily "{}\+Ctrl+\+Alt+\+Z"{}}  &Opens the flyout for the foreground window from the keyboard; see \doxysectlink{page_config_config_hotkey}{Opening the flyout from the keyboard}{1} below. {\ttfamily "{}"{}} switches it off. (mfly::\+\+Config::\+open\+Hotkey)  \\
+{\ttfamily button\+Detection}  &{\ttfamily "{}auto"{}}, {\ttfamily "{}hittest"{}}, {\ttfamily "{}computed"{}}  &{\ttfamily "{}auto"{}}  &How the minimize button is located; \doxysectlink{index_main_detection}{How the button is located}{2} walks the three. An unknown value is a configuration error and leaves the default in place. (mfly::\+\+Config::\+button\+Detection)  \\
+{\ttfamily trace\+Detection}  &boolean  &{\ttfamily false}  &One log line per gate of the detection, so a mouse movement that never reaches the probe can be followed to where it died. One line per change, not per movement, and only in a build with the logging macros compiled in. (mfly::\+\+Config::\+trace\+Detection)  \\
+{\ttfamily log\+To\+File}  &boolean  &{\ttfamily false}  &Also write the log to {\ttfamily \%APPDATA\%\textbackslash{}Min\+Flyout\textbackslash{}minflyout.\+log}, UTF-\/8 with BOM, rotated to {\ttfamily }.log.\+1 at 1 MB. The debugger output is always written; this only adds the file, and only where logging is compiled in. (mfly::\+\+Config::\+log\+To\+File)  \\
+{\ttfamily watch\+Config}  &boolean  &{\ttfamily true}  &Reload as soon as the file is saved. Worth turning off if {\ttfamily \%APPDATA\%} is redirected to a share that reports no changes. (mfly::\+\+Config::\+watch\+Config)  \\
+{\ttfamily layouts}  &array of \doxysectlink{page_config_config_layout}{The layout object}{1}  &five built-\/in  &The layouts the flyout offers. A missing key falls back to mfly::\+\+Default\+Layouts; an explicitly empty list {\ttfamily }\+[] hides the miniature area and leaves only the text items. (mfly::\+\+Config::\+layouts)  \\
+{\ttfamily touch}  &object  &see \doxysectlink{page_config_config_touch}{The touch block}{1}  &Dragging a window into a zone with the finger. (mfly::\+\+Config::\+touch)  \\
+\end{DoxyTable}
+
+
+Numbers outside their range are clamped rather than rejected: a {\ttfamily hover\+Delay\+Ms} of 100000 becomes 5000 and the file still loads. The only values that make the load fail are structural -\/ a {\ttfamily "{}layouts"{}} that is not an array, a {\ttfamily "{}button\+Detection"{}} nobody knows, a malformed {\ttfamily "{}touch"{}}. \doxysectlink{page_config_config_errors}{When the file does not parse}{1} says what happens then.\hypertarget{page_config_config_uiscale}{}\doxysubsection{\texorpdfstring{Making the flyout bigger}{Making the flyout bigger}}\label{page_config_config_uiscale}
+Windows sizes the flyout for the resolution of the screen, which on a small panel means small -\/ correct in millimetres, and awkward to hit. {\ttfamily "{}ui\+Scale"{}} multiplies that.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{"{}uiScale"{}:\ 1.4,}
+
+\end{DoxyCode}
+
+
+The factor is folded into the DPI the flyout is laid out for (mfly::\+\+Scaled\+Dpi), and every metric already goes through that DPI. Fonts, paddings, corner radii and the miniatures therefore grow together and nothing can be pulled out of proportion -\/ it is the same multiplication a higher-\/resolution screen would apply. Accepted range is mfly::\+k\+Min\+Ui\+Scale to mfly::\+k\+Max\+Ui\+Scale; values below 1 shrink it.
+
+A factor is a wish, not an instruction. On the very screen it is meant for it may ask for more room than there is, so mfly::\+\+Flyout\+Window::\+\+Show compares the measured size with the work area and walks the factor back until it fits -\/ but never below 1.\+0, so asking for a larger flyout can never hand out a smaller one. A reduction is written to the log.
+
+The touch overlay has no such setting: its trigger field and its zones are given in percent of the screen and are therefore already as large as the screen is.\hypertarget{page_config_config_hotkey}{}\doxysubsection{\texorpdfstring{Opening the flyout from the keyboard}{Opening the flyout from the keyboard}}\label{page_config_config_hotkey}
+{\ttfamily "{}open\+Hotkey"{}} is the keyboard route to what the hover opens. Pressed, it opens the flyout for the foreground window, below its minimize button -\/ the button is located the way the detection computes it when a window does not answer the hit test (mfly::\+\+Compute\+Minimize\+Button). A window without a minimize button gets the flyout below the middle of its title bar.
+
+Such a flyout ignores where the pointer is. It closes on the same keys again, on Esc, on a click outside it, when a window is chosen in it, and when another window comes to the front. While detection is paused the hotkey does nothing.
+
+The tray menu offers the same as {\itshape Open flyout for the active window}, with the hotkey shown beside it -\/ reachable without a mouse through Win+B, the arrow keys and Enter, and the way out when the combination belongs to some other program. Opening the tray menu puts the taskbar in front, so the entry acts on the window that was in front before (mfly::\+\+App\+Controller::\+\+User\+Window).
+
+Inside the flyout, Tab and Shift+\+Tab move from monitor to monitor (the resize toolbar and the text items are stops as well), the arrow keys move within one, Home and End jump to its ends, Enter and Space choose. The details are at mfly::\+\+Flyout\+Window::\+\+Handle\+Key and mfly::\+\+Hook\+Thread::\+\+Set\+Key\+Navigation.
+
+Spelling (mfly::\+\+Parse\+Hotkey): parts joined by {\ttfamily \textquotesingle{}+\textquotesingle{}}, case and blanks do not matter.
+
+
+\begin{DoxyTable}{2}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Part  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Allowed  \\
+Modifiers  &{\ttfamily Ctrl} ({\ttfamily Strg}), {\ttfamily Alt}, {\ttfamily Shift} ({\ttfamily Umschalt}), {\ttfamily Win}  \\
+Keys  &{\ttfamily A} -\/ {\ttfamily Z}, {\ttfamily 0} -\/ {\ttfamily 9}, {\ttfamily F1} -\/ {\ttfamily F24}, {\ttfamily Space}, {\ttfamily Enter}, {\ttfamily Tab}, {\ttfamily Backspace}, {\ttfamily Insert}, {\ttfamily Delete}, {\ttfamily Home}, {\ttfamily End}, {\ttfamily Page\+Up}, {\ttfamily Page\+Down}, {\ttfamily Up}, {\ttfamily Down}, {\ttfamily Left}, {\ttfamily Right}, {\ttfamily Pause}  \\
+\end{DoxyTable}
+
+
+A key other than F1 -\/ F24 needs Ctrl, Alt or Win -\/ {\ttfamily "{}\+Shift+\+A"{}} would swallow every capital A. {\ttfamily Esc} is refused, it is what closes the flyout. An unknown spelling is a configuration error. A combination that another program already holds is reported in a balloon after a reload and in the log; the tray menu entry keeps working.
+
+On keyboard layouts with Alt\+Gr, Ctrl+\+Alt+letter is the same as Alt\+Gr+letter. Z carries no character on the German, Swiss or French layouts; on a layout where it does (Polish ż), pick another key.\hypertarget{page_config_config_zone}{}\doxysubsection{\texorpdfstring{The zone object}{The zone object}}\label{page_config_config_zone}
+A mfly::\+\+Zone is a rectangle in percent of the reference area -\/ the work area or the full monitor, depending on {\ttfamily "{}use\+Work\+Area"{}}.
+
+
+\begin{DoxyTable}{4}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Field  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Range  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Default  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Meaning  \\
+{\ttfamily left}  &-\/400 -\/ 99  &{\ttfamily 0}  &Left edge in percent.  \\
+{\ttfamily top}  &-\/400 -\/ 99  &{\ttfamily 0}  &Top edge in percent.  \\
+{\ttfamily width}  &1 -\/ 500  &{\ttfamily 50}  &Width in percent.  \\
+{\ttfamily height}  &1 -\/ 500  &{\ttfamily 100}  &Height in percent.  \\
+\end{DoxyTable}
+
+
+A zone does not have to stay on its monitor. A negative {\ttfamily left} or {\ttfamily top}, or a {\ttfamily left} + {\ttfamily width} ({\ttfamily top} + {\ttfamily height}) beyond 100, lets the window reach onto the neighbouring screen -\/ {\ttfamily \{ "{}left"{}: -\/10, "{}top"{}: 0, "{}width"{}: 60, "{}height"{}: 100 \}} starts a tenth of a screen width to the left of this monitor. The percentages always refer to the monitor the zone is picked on, so the overhang is measured in {\itshape its} width and height, not in those of the neighbour. At least 1 \% of each axis has to stay on the zone\textquotesingle{}s own monitor; a zone lying entirely beside it is dropped. Where there is no neighbouring screen, the overhanging part simply ends up off the desktop.
+
+In the miniature such a tile is cut off at the edge and touches the frame there; the touch overlay likewise only shows the part on this screen. Windows assigns a window to the monitor holding the larger part of it -\/ a per-\/monitor DPI aware application whose larger part lands on a screen with a different scale factor may therefore resize itself after being placed.
+
+The limits are exactly the ones mfly::\+\+Zone\+From\+Window applies to a measured zone (both go through mfly::\+\+Limit\+Zone), so a line produced by Ctrl+\+Alt+\+F11 comes back out of the file as the window it was taken from -\/ including a window hanging over the edge of its screen.
+
+The touch trigger field ({\ttfamily touch.\+trigger}) is the one exception: it has to be reachable on this screen and stays within 0 -\/ 99 / 1 -\/ 100.
+
+Zones are meant to tile the area without overlapping, the way the Windows snap layouts do -\/ but nothing enforces it. Where they do overlap, the smallest one under the pointer wins (mfly::\+\+Smallest\+Hit), so a small tile drawn on top of a large one stays reachable. Fractions are allowed and are how thirds are spelled: {\ttfamily 33.\+33} / {\ttfamily 33.\+34} / {\ttfamily 66.\+66}.\hypertarget{page_config_config_layout}{}\doxysubsection{\texorpdfstring{The layout object}{The layout object}}\label{page_config_config_layout}
+
+\begin{DoxyTable}{4}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Field  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Type  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Required  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Meaning  \\
+{\ttfamily name}  &string  &no  &Caption below the miniature, and the label in the touch trigger field.  \\
+{\ttfamily zones}  &array of \doxysectlink{page_config_config_zone}{The zone object}{1}  &yes  &The tiles, in drawing order. A layout without a single usable zone is dropped silently.  \\
+{\ttfamily monitors}  &selector or array of selectors  &no  &Which screens the layout is offered on; omitted means all of them. The accepted forms are listed in \doxysectlink{index_main_monitor_layouts}{Layouts for one screen}{2} on the main page.  \\
+\end{DoxyTable}
+\hypertarget{page_config_config_touch}{}\doxysubsection{\texorpdfstring{The touch block}{The touch block}}\label{page_config_config_touch}
+Pick a window up by its title bar with the finger, rest it in the field that appears, and the zones unfold across the screen; let go over one of them and the window lands there. mfly::\+\+Drag\+Watcher notices the drag, mfly::\+\+Zone\+Overlay draws the target.
+
+
+\begin{DoxyTable}{4}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Key  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Type  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Default  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Meaning  \\
+{\ttfamily enabled}  &boolean  &{\ttfamily true}  &Whether the drag route is offered at all. (mfly::\+\+Touch\+Config::\+enabled)  \\
+{\ttfamily also\+Mouse}  &boolean  &{\ttfamily false}  &React to a window dragged with the mouse as well. Off by default -\/ with a mouse the flyout is the shorter way -\/ and the way to try the overlay out on a machine without a touchscreen. (mfly::\+\+Touch\+Config::\+also\+Mouse)  \\
+{\ttfamily dwell\+Ms}  &integer, 0 -\/ 5000  &{\ttfamily 250}  &How long the finger must rest in the trigger field before the zones unfold. Too short and merely carrying a window across the middle of the screen opens them. (mfly::\+\+Touch\+Config::\+dwell\+Ms)  \\
+{\ttfamily trigger}  &\doxysectlink{page_config_config_zone}{The zone object}{1}  &40 / 40 / 20 / 20  &Where the field sits, in percent of the same reference area the zones use. It only exists while a window is actually being dragged, so it may be generous. (mfly::\+\+Touch\+Config::\+trigger)  \\
+{\ttfamily layouts}  &array of \doxysectlink{page_config_config_layout}{The layout object}{1}  &the flyout\textquotesingle{}s  &The zone sets offered while dragging. (mfly::\+\+Touch\+Config::\+layouts)  \\
+\end{DoxyTable}
+
+
+Touch has its own layouts because it is a different task. Picking one of five miniatures with a mouse is a menu; doing it with a window already in mid-\/drag is not. So there is exactly {\bfseries{one}} drop target: the first layout in {\ttfamily touch.\+layouts} whose {\ttfamily "{}monitors"{}} selector matches the screen the finger is on (mfly::\+\+Layouts\+For\+Monitor). Leave {\ttfamily layouts} out entirely and the flyout\textquotesingle{}s layouts are used instead, so a configuration that never heard of touch gains the drag route without being edited.
+
+A screen no layout applies to simply shows no field there; the drag stays an ordinary drag, and moving to a screen that has one still works.\hypertarget{page_config_config_errors}{}\doxysubsection{\texorpdfstring{When the file does not parse}{When the file does not parse}}\label{page_config_config_errors}
+The application keeps running with the default values and reports line and column of the error -\/ in the flyout as a clickable item, and on reload as a balloon on the tray icon (mfly::\+\+Config::\+error). Nothing is silently half applied: either a load succeeds and replaces the configuration, or the previous values stay in place.
+
+Individual entries are more forgiving than the file as a whole. A layout without a usable zone, a zone that is not an object, a monitor selector that is neither a number nor a string -\/ each is dropped and the rest is kept, because one malformed layout is not worth refusing a whole file over.\hypertarget{page_config_config_examples}{}\doxysubsection{\texorpdfstring{Examples}{Examples}}\label{page_config_config_examples}
+\hypertarget{page_config_config_ex_laptop}{}\doxysubsubsection{\texorpdfstring{A small laptop screen}{A small laptop screen}}\label{page_config_config_ex_laptop}
+The flyout enlarged, and only the two arrangements that are comfortable on a 13-\/inch panel. Thirds are deliberately absent -\/ they are cramped there.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{}
+\DoxyCodeLine{\ \ "{}uiScale"{}:\ 1.4,}
+\DoxyCodeLine{\ \ "{}hoverDelayMs"{}:\ 300,}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ "{}layouts"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Halves"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ "{}top"{}:\ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 50,\ "{}top"{}:\ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Quarters"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ "{}top"{}:\ \ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 50,\ "{}top"{}:\ \ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ "{}top"{}:\ 50,\ "{}width"{}:\ 50,\ "{}height"{}:\ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 50,\ "{}top"{}:\ 50,\ "{}width"{}:\ 50,\ "{}height"{}:\ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ ],}
+\DoxyCodeLine{\}}
+
+\end{DoxyCode}
+\hypertarget{page_config_config_ex_two_screens}{}\doxysubsubsection{\texorpdfstring{An ultrawide next to a laptop}{An ultrawide next to a laptop}}\label{page_config_config_ex_two_screens}
+Thirds belong on the wide screen, halves on the laptop panel, and the full screen everywhere. Every layout names the screens it is offered on, so each row of the flyout carries only what makes sense there.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{}
+\DoxyCodeLine{\ \ "{}showAllMonitors"{}:\ true,}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ "{}layouts"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Thirds"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}monitors"{}:\ [\ "{}3840x2160"{}\ ],}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ \ \ \ "{}top"{}:\ 0,\ "{}width"{}:\ 33.34,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 33.33,\ "{}top"{}:\ 0,\ "{}width"{}:\ 33.34,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 66.66,\ "{}top"{}:\ 0,\ "{}width"{}:\ 33.34,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Wide\ +\ two"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}monitors"{}:\ [\ "{}3840x2160"{}\ ],}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ "{}top"{}:\ \ 0,\ "{}width"{}:\ 66,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 66,\ "{}top"{}:\ \ 0,\ "{}width"{}:\ 34,\ "{}height"{}:\ \ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 66,\ "{}top"{}:\ 50,\ "{}width"{}:\ 34,\ "{}height"{}:\ \ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Halves"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}monitors"{}:\ [\ "{}secondary"{}\ ],}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ "{}top"{}:\ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 50,\ "{}top"{}:\ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Full\ screen"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 0,\ "{}top"{}:\ 0,\ "{}width"{}:\ 100,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ ],}
+\DoxyCodeLine{\}}
+
+\end{DoxyCode}
+
+
+The selectors may be mixed in one list -\/ {\ttfamily \+[1, "{}secondary"{}]} is valid -\/ and a screen that no layout applies to is left out of the flyout entirely. That is also the way to exclude one: give every layout a list that omits it.\hypertarget{page_config_config_ex_tablet}{}\doxysubsubsection{\texorpdfstring{A tablet that turns}{A tablet that turns}}\label{page_config_config_ex_tablet}
+Rotating a Surface changes its resolution, so the resolution selector is also an orientation selector. Two touch layouts, one per posture: side by side when the screen is wide, stacked when it is tall.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{}
+\DoxyCodeLine{\ \ "{}uiScale"{}:\ 1.5,}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ "{}touch"{}:\ \{}
+\DoxyCodeLine{\ \ \ \ "{}enabled"{}:\ true,}
+\DoxyCodeLine{\ \ \ \ "{}dwellMs"{}:\ 250,}
+\DoxyCodeLine{\ \ \ \ "{}trigger"{}:\ \{\ "{}left"{}:\ 38,\ "{}top"{}:\ 38,\ "{}width"{}:\ 24,\ "{}height"{}:\ 24\ \},}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ \ \ "{}layouts"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ "{}name"{}:\ "{}Landscape"{},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ "{}monitors"{}:\ [\ "{}2880x1920"{}\ ],}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ "{}top"{}:\ \ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 50,\ "{}top"{}:\ \ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ \ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 50,\ "{}top"{}:\ 50,\ "{}width"{}:\ 50,\ "{}height"{}:\ \ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \ \ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ "{}name"{}:\ "{}Portrait"{},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ "{}monitors"{}:\ [\ "{}1920x2880"{}\ ],}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 0,\ "{}top"{}:\ \ 0,\ "{}width"{}:\ 100,\ "{}height"{}:\ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 0,\ "{}top"{}:\ 50,\ "{}width"{}:\ 100,\ "{}height"{}:\ 50\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \ \ \},}
+\DoxyCodeLine{\ \ \ \ ],}
+\DoxyCodeLine{\ \ \},}
+\DoxyCodeLine{\}}
+
+\end{DoxyCode}
+
+
+The first matching layout is the one that shows, so the two lists must not both match the same screen -\/ which is what the two resolutions guarantee.\hypertarget{page_config_config_ex_touch_mouse}{}\doxysubsubsection{\texorpdfstring{Trying the touch route without a touchscreen}{Trying the touch route without a touchscreen}}\label{page_config_config_ex_touch_mouse}
+{\ttfamily "{}also\+Mouse"{}} makes the overlay react to a window dragged with the mouse, so the whole route can be developed and watched at a desk. Everything else stays as it is.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{}
+\DoxyCodeLine{\ \ "{}touch"{}:\ \{}
+\DoxyCodeLine{\ \ \ \ "{}alsoMouse"{}:\ true,}
+\DoxyCodeLine{\ \ \ \ "{}dwellMs"{}:\ 400,}
+\DoxyCodeLine{\ \ \},}
+\DoxyCodeLine{\}}
+
+\end{DoxyCode}
+
+
+A longer dwell helps here: a mouse crosses the middle of the screen faster and more often than a finger does.\hypertarget{page_config_config_ex_items}{}\doxysubsubsection{\texorpdfstring{Text items only}{Text items only}}\label{page_config_config_ex_items}
+An explicitly empty layout list is a valid setting, and a different one from a missing key: it hides the miniature area instead of falling back to the built-\/in layouts. What remains is minimize, minimize to the notification area, always on top, minimize all windows of this app, minimize other windows and show desktop.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{}
+\DoxyCodeLine{\ \ "{}layouts"{}:\ [],}
+\DoxyCodeLine{\ \ "{}touch"{}:\ \{\ "{}enabled"{}:\ false\ \},}
+\DoxyCodeLine{\}}
+
+\end{DoxyCode}
+\hypertarget{page_config_config_ex_debug}{}\doxysubsubsection{\texorpdfstring{Chasing an app that stays undetected}{Chasing an app that stays undetected}}\label{page_config_config_ex_debug}
+Nothing here changes what the flyout offers -\/ it changes what Min\+Flyout says about itself. \doxysectlink{index_main_diagnosis}{When a window stays undetected}{2} explains how to read the result.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{}
+\DoxyCodeLine{\ \ //\ Log\ every\ gate\ of\ the\ detection,\ not\ just\ the\ successful\ ones.}
+\DoxyCodeLine{\ \ "{}traceDetection"{}:\ true,}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ //\ ...\ and\ keep\ it,\ so\ the\ log\ survives\ the\ next\ start.}
+\DoxyCodeLine{\ \ "{}logToFile"{}:\ true,}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ //\ Never\ ask\ the\ window,\ always\ compute\ -\/\ which\ shows\ whether\ the\ app}
+\DoxyCodeLine{\ \ //\ answers\ WM\_NCHITTEST\ at\ all\ or\ whether\ the\ geometry\ is\ what\ is\ wrong.}
+\DoxyCodeLine{\ \ "{}buttonDetection"{}:\ "{}computed"{},}
+\DoxyCodeLine{\}}
+
+\end{DoxyCode}
+
+
+Both log settings only take effect in a build with the logging macros compiled in ({\ttfamily \+\_\+\+DEBUG} or {\ttfamily \+\_\+\+RELEASE\+\_\+\+WITH\+\_\+\+DEBUG\+\_\+\+LOG}). The Ctrl+\+Alt+\+F12 diagnosis works in a plain release build regardless, and says on its second line which of the two is running. 

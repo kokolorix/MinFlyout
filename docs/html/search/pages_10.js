@@ -1,0 +1,26 @@
+var searchData=
+[
+  ['tablet_20that_20turns_0',['A tablet that turns',['../page_config.html#config_ex_tablet',1,'']]],
+  ['text_20items_20only_1',['Text items only',['../page_config.html#config_ex_items',1,'']]],
+  ['that_20stays_20undetected_2',['Chasing an app that stays undetected',['../page_config.html#config_ex_debug',1,'']]],
+  ['that_20turns_3',['A tablet that turns',['../page_config.html#config_ex_tablet',1,'']]],
+  ['the_20button_20is_20located_4',['How the button is located',['../index.html#main_detection',1,'']]],
+  ['the_20file_5',['The file',['../page_config.html#config_file',1,'']]],
+  ['the_20file_20does_20not_20parse_6',['When the file does not parse',['../page_config.html#config_errors',1,'']]],
+  ['the_20flyout_20bigger_7',['Making the flyout bigger',['../page_config.html#config_uiscale',1,'']]],
+  ['the_20flyout_20from_20the_20keyboard_8',['Opening the flyout from the keyboard',['../page_config.html#config_hotkey',1,'']]],
+  ['the_20flyout_20shows_9',['What the flyout shows',['../index.html#main_flyout',1,'']]],
+  ['the_20keyboard_10',['Opening the flyout from the keyboard',['../page_config.html#config_hotkey',1,'']]],
+  ['the_20layout_20object_11',['The layout object',['../page_config.html#config_layout',1,'']]],
+  ['the_20log_20in_20logviewplus_12',['Reading the log in LogViewPlus',['../index.html#main_logviewplus',1,'']]],
+  ['the_20touch_20block_13',['The touch block',['../page_config.html#config_touch',1,'']]],
+  ['the_20touch_20route_20without_20a_20touchscreen_14',['Trying the touch route without a touchscreen',['../page_config.html#config_ex_touch_mouse',1,'']]],
+  ['the_20zone_20object_15',['The zone object',['../page_config.html#config_zone',1,'']]],
+  ['to_20a_20laptop_16',['An ultrawide next to a laptop',['../page_config.html#config_ex_two_screens',1,'']]],
+  ['top_20level_20keys_17',['Top-level keys',['../page_config.html#config_top',1,'']]],
+  ['touch_20block_18',['The touch block',['../page_config.html#config_touch',1,'']]],
+  ['touch_20route_20without_20a_20touchscreen_19',['Trying the touch route without a touchscreen',['../page_config.html#config_ex_touch_mouse',1,'']]],
+  ['touchscreen_20',['Trying the touch route without a touchscreen',['../page_config.html#config_ex_touch_mouse',1,'']]],
+  ['trying_20the_20touch_20route_20without_20a_20touchscreen_21',['Trying the touch route without a touchscreen',['../page_config.html#config_ex_touch_mouse',1,'']]],
+  ['turns_22',['A tablet that turns',['../page_config.html#config_ex_tablet',1,'']]]
+];

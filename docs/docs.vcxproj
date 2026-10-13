@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Helper project: generates the Doxygen documentation into build\docs\html.
+  Version.doxyfile is written first, so the documentation carries the version
+  of the tree it was generated from (MinFlyout.dox pulls it in by @INCLUDE).
   Doxygen must be on the PATH (https://www.doxygen.nl). If it is missing, the
   build only prints a note and does not fail.
 -->
@@ -23,7 +25,6 @@
       <Platform>ARM64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
-
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <ProjectGuid>{AFBF5B34-2C7A-4309-ADBF-E76220251712}</ProjectGuid>
@@ -31,34 +32,29 @@
     <ProjectName>docs</ProjectName>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-
   <PropertyGroup Label="Configuration">
     <ConfigurationType>Utility</ConfigurationType>
     <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\MinFlyout.props" />
   </ImportGroup>
-
   <PropertyGroup>
     <IntDir>$(MinFlyoutRoot)build\obj\docs\</IntDir>
     <OutDir>$(MinFlyoutRoot)build\docs\</OutDir>
   </PropertyGroup>
-
   <ItemDefinitionGroup>
     <PostBuildEvent>
       <Command>where doxygen &gt;nul 2&gt;&amp;1 || (echo Doxygen was not found in PATH - documentation skipped. &amp; exit /b 0)
 cd /d "$(MinFlyoutRoot)"
-doxygen Doxyfile</Command>
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(MinFlyoutRoot)tools\GenerateVersion.ps1" -ProjectDir "$(MinFlyoutRoot)." -OutputPath "$(MinFlyoutRoot)res\Version.h" -DoxygenPath "$(MinFlyoutRoot)Version.doxyfile" -VersionFile "$(MinFlyoutRoot)Version.txt"
+doxygen MinFlyout.dox</Command>
       <Message>Generating Doxygen documentation</Message>
     </PostBuildEvent>
   </ItemDefinitionGroup>
-
   <ItemGroup>
     <None Include="..\.claudiaideconfig" />
     <None Include="..\build\doxygen-html\index.html" />
@@ -66,8 +62,7 @@ doxygen Doxyfile</Command>
     <None Include="mainpage.dox" />
     <None Include="groups.dox" />
     <None Include="configuration.dox" />
-    <None Include="..\Doxyfile" />
+    <None Include="..\MinFlyout.dox" />
   </ItemGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

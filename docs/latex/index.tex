@@ -1,0 +1,264 @@
+\chapter{Min\+Flyout }
+\hypertarget{index}{}\label{index}\index{MinFlyout@{MinFlyout}}
+A system-\/wide flyout above the {\bfseries{minimize}} button -\/ the counterpart to the Snap Layouts that Windows shows above the maximize button. Pure Win32/\+\+C++20, GDI rendering, no runtime dependencies and no third-\/party libraries. The flyout previews the monitors with their configured zones; the layouts live in a JSONC file in the user profile and can be tied to particular screens.\hypertarget{index_main_flow}{}\doxysection{\texorpdfstring{Flow}{Flow}}\label{index_main_flow}
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{[hook\ thread]\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ [controller\ UI\ thread]}
+\DoxyCodeLine{WH\_MOUSE\_LL\ ──PostMessage──▶\ \ HandleMouseMove()}
+\DoxyCodeLine{(does\ NOTHING\ but\ post)\ \ \ \ \ \ \ \ ├─\ WindowFromPoint\ +\ GetAncestor(GA\_ROOT)}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ ├─\ ask:\ \ \ \ \ WM\_NCHITTEST\ ==\ HTMINBUTTON}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ │\ \ \ \ \ \ \ \ \ \ \ then\ edge\ search\ =>\ button\ rect}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ │\ \ \ \ \ \ \ \ \ \ \ (gated\ by\ nothing\ of\ ours)}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ ├─\ \textcolor{keywordflow}{else},\ and\ only\ inside\ the\ caption\ button}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ │\ \ region:\ compute\ from\ the\ DWM\ block,\ the}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ │\ \ title\ bar\ strip\ or\ the\ frame}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ ├─\ hover\ delay\ \ ──▶\ \ monitors\ +\ layouts\ +\ items}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ └─\ FlyoutWindow::Show(content,\ buttonRect,\ dpi)}
+
+\end{DoxyCode}
+
+
+A finger has no hover and the minimize button is far too small for one, so touch takes a second route into the same mfly::\+\+Apply\+Zone. There the window itself is the pointer:
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{[WinEvent\ hook]\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ [controller\ UI\ thread]}
+\DoxyCodeLine{MOVESIZESTART\ ──PostMessage──▶\ OnDragStart()}
+\DoxyCodeLine{(a\ window\ is\ being\ moved)\ \ \ \ \ \ \ ├─\ was\ the\ press\ a\ contact,\ on\ a\ caption?}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ ├─\ ZoneOverlay::ShowTrigger(monitor,\ layout)}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ ├─\ dwell\ in\ the\ field\ \ ──▶\ \ SwitchToZones()}
+\DoxyCodeLine{WH\_MOUSE\_LL\ \ \ ──PostMessage──▶\ \ ├─\ ZoneOverlay::Track(point)}
+\DoxyCodeLine{MOVESIZEEND\ \ \ ──PostMessage──▶\ \ └─\ ApplyZone(window,\ zone,\ monitor)}
+
+\end{DoxyCode}
+\hypertarget{index_main_design}{}\doxysection{\texorpdfstring{Design decisions}{Design decisions}}\label{index_main_design}
+
+\begin{DoxyItemize}
+\item {\bfseries{No DLL injection, no CBT hooks.}} Nothing is loaded into a foreign process. Detection asks through {\ttfamily WM\+\_\+\+NCHITTEST} via {\ttfamily Send\+Message\+Timeout} ({\ttfamily SMTO\+\_\+\+ABORTIFHUNG}), the documented interface Windows itself uses to evaluate the caption buttons, and otherwise reads public window data. See mfly::\+\+Probe\+Minimize\+Button.
+\item {\bfseries{The button rect is measured, not guessed.}} Starting from the cursor, all four directions are searched for how far {\ttfamily HTMINBUTTON} still applies -\/ first coarsely in 4-\/pixel steps, then refined by binary search. This makes detection independent of theme, DPI and border width.
+\item {\bfseries{And where nobody answers, it is computed.}} An app with its own title bar may report its button area as plain client space; then the position is derived instead, from the caption button block DWM reports, from the title bar strip, or in the end from the visible frame and the caption height. The arithmetic is in Caption\+Geometry.\+h, the ladder in mfly::\+\+Probe\+Source.
+\item {\bfseries{Hooks in a dedicated thread.}} Low-\/level hooks are processed synchronously in the input path; if the same thread queried a hung window, the mouse would stutter system-\/wide. See mfly::\+\+Hook\+Thread.
+\item {\bfseries{The flyout never activates itself}} ({\ttfamily WS\+\_\+\+EX\+\_\+\+NOACTIVATE} and {\ttfamily MA\+\_\+\+NOACTIVATE}), the target window keeps the focus.
+\item {\bfseries{Flush edges.}} When the size is applied, the invisible shadow border from {\ttfamily DWMWA\+\_\+\+EXTENDED\+\_\+\+FRAME\+\_\+\+BOUNDS} is subtracted, otherwise a gap opens up between two windows placed side by side (mfly::\+\+Apply\+Zone).
+\item {\bfseries{Windows announces the drag.}} {\ttfamily EVENT\+\_\+\+SYSTEM\+\_\+\+MOVESIZESTART} and {\ttfamily }...\+\_\+\+MOVESIZEEND bracket the modal loop {\ttfamily Def\+Window\+Proc} runs while a window is dragged. Registered {\ttfamily WINEVENT\+\_\+\+OUTOFCONTEXT}, the callback arrives on our own message loop -\/ the same promise the detection makes, and cheaper than guessing a drag from mouse movements (mfly::\+\+Drag\+Watcher).
+\item {\bfseries{The touch overlay never takes input.}} {\ttfamily WS\+\_\+\+EX\+\_\+\+TRANSPARENT} plus {\ttfamily WS\+\_\+\+EX\+\_\+\+NOACTIVATE:} every touch point passes straight through to the window being dragged, and where the finger is comes from the mouse hook that already exists. Nothing the overlay does can interrupt the drag it is drawn for (mfly::\+\+Zone\+Overlay).
+\item {\bfseries{Move is told from resize by the press, not by the event.}} {\ttfamily MOVESIZESTART} brackets both, so the hit test has to happen at the moment of the press -\/ before the window disappears into its loop and stops answering (mfly::\+\+App\+Controller::\+\+Remember\+Press). The answer is read as a blacklist rather than as a whitelist: asking for {\ttfamily HTCAPTION} looks equivalent and excludes every application that draws its own title bar, because such a window reports {\ttfamily HTCLIENT} there and moves itself. The sizing codes are the closed list (mfly::\+\+Is\+Sizing\+Hit\+Test).
+\item {\bfseries{One arithmetic for both windows.}} Percent to pixels, the gap between tiles and the rule for overlapping zones live in Overlay\+Geometry.\+h, free of Windows dependencies and covered by {\ttfamily tests/\+\+Overlay\+Geometry\+Test.\+cpp}. The flyout\textquotesingle{}s miniature and the full-\/screen overlay therefore draw the same zone as the same rectangle.
+\end{DoxyItemize}\hypertarget{index_main_modules}{}\doxysection{\texorpdfstring{Modules}{Modules}}\label{index_main_modules}
+
+\begin{DoxyTable}{2}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Module  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Content  \\
+\doxylink{group__app}{Application}  &mfly::\+\+App\+Controller, state machine, entry point  \\
+\doxylink{group__detect}{Detection}  &mfly::\+\+Hook\+Thread, mfly::\+\+Drag\+Watcher, mfly::\+\+Probe\+Minimize\+Button, mfly::\+\+Caption\+Button\+Rect  \\
+\doxylink{group__ui}{User interface}  &mfly::\+\+Flyout\+Window, mfly::\+\+Zone\+Overlay, mfly::\+\+Percent\+To\+Pixels, mfly::\+\+Enumerate\+Monitors, mfly::\+\+Tray\+Stash  \\
+\doxylink{group__config}{Configuration and items}  &mfly::\+\+Config\+Store, mfly::\+\+Selector\+Matches, mfly::\+\+Registry, mfly::\+\+Apply\+Zone  \\
+\end{DoxyTable}
+\hypertarget{index_main_config}{}\doxysection{\texorpdfstring{Configuration file}{Configuration file}}\label{index_main_config}
+\doxylink{page_config}{Configuration reference} has every key with its default and its range, together with complete example files for a small laptop, two screens of different shape, a tablet that turns, and a session spent chasing an app that stays undetected. What follows here is the shape of the file.
+
+On first start {\ttfamily \%APPDATA\%\textbackslash{}Min\+Flyout\textbackslash{}config.\+jsonc} is created with a commented template. The format is JSONC -\/ comments and trailing commas are allowed:
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{}
+\DoxyCodeLine{\ \ "{}hoverDelayMs"{}:\ 350,\ \ \ \ \ \ \ //\ hover\ delay\ before\ opening}
+\DoxyCodeLine{\ \ "{}closeGraceMs"{}:\ 260,\ \ \ \ \ \ \ //\ grace\ period\ before\ closing}
+\DoxyCodeLine{\ \ "{}showBuiltinItems"{}:\ true,\ \ //\ show\ the\ text\ items\ below\ the\ layouts}
+\DoxyCodeLine{\ \ "{}useWorkArea"{}:\ true,\ \ \ \ \ \ \ //\ compute\ percentages\ without\ the\ taskbar}
+\DoxyCodeLine{\ \ "{}showAllMonitors"{}:\ true,\ \ \ //\ offer\ every\ screen,\ not\ just\ the\ current\ one}
+\DoxyCodeLine{\ \ "{}uiScale"{}:\ 1.0,\ \ \ \ \ \ \ \ \ \ \ \ //\ size\ factor\ of\ the\ flyout\ (see\ page\_config)}
+\DoxyCodeLine{\ \ "{}openHotkey"{}:\ "{}Ctrl+Alt+Z"{},\ //\ open\ the\ flyout\ for\ the\ active\ window}
+\DoxyCodeLine{\ \ "{}buttonDetection"{}:\ "{}auto"{},\ //\ ask\ the\ window,\ compute\ when\ it\ stays\ silent}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ "{}layouts"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Halves"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ \ 0,\ "{}top"{}:\ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ \ \ \{\ "{}left"{}:\ 50,\ "{}top"{}:\ 0,\ "{}width"{}:\ 50,\ "{}height"{}:\ 100\ \},}
+\DoxyCodeLine{\ \ \ \ \ \ ],}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ \ \ \{}
+\DoxyCodeLine{\ \ \ \ \ \ "{}name"{}:\ "{}Thirds"{},}
+\DoxyCodeLine{\ \ \ \ \ \ "{}monitors"{}:\ [\ "{}3840x2160"{}\ ],\ \ \ //\ only\ on\ the\ wide\ screen}
+\DoxyCodeLine{\ \ \ \ \ \ "{}zones"{}:\ [\ ...\ ],\ \ \ \ \ \ \ \ \ \ \ \ \ \ //\ as\ above}
+\DoxyCodeLine{\ \ \ \ \},}
+\DoxyCodeLine{\ \ ],}
+\DoxyCodeLine{}
+\DoxyCodeLine{\ \ "{}touch"{}:\ \{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ //\ dragging\ a\ window\ into\ a\ zone\ by\ finger}
+\DoxyCodeLine{\ \ \ \ "{}dwellMs"{}:\ 250,}
+\DoxyCodeLine{\ \ \ \ "{}trigger"{}:\ \{\ "{}left"{}:\ 40,\ "{}top"{}:\ 40,\ "{}width"{}:\ 20,\ "{}height"{}:\ 20\ \},}
+\DoxyCodeLine{\ \ \ \ "{}layouts"{}:\ [\ ...\ ],\ \ \ \ \ \ \ \ \ \ \ \ \ \ //\ shaped\ like\ "{}layouts"{}\ above}
+\DoxyCodeLine{\ \ \},}
+\DoxyCodeLine{\}}
+
+\end{DoxyCode}
+
+
+A mfly::\+\+Layout is drawn as a miniature of the monitor, each of its mfly::\+\+Zone entries as a tile inside it. All four zone values are percentages of the monitor the miniature stands for. Values below 0 or beyond 100 reach onto the neighbouring screen (see \doxysectlink{page_config_config_zone}{The zone object}{1}).
+
+Zones are meant to tile the screen without overlapping, the way the Windows snap layouts do -\/ but nothing enforces it. Where zones do overlap, the smallest one under the cursor wins, so a small tile drawn on top of a large one stays reachable.
+
+A missing {\ttfamily layouts} section falls back to mfly::\+\+Default\+Layouts; an explicitly empty list hides the miniature area and leaves the text items.\hypertarget{index_main_capture}{}\doxysubsection{\texorpdfstring{Writing a zone down without counting pixels}{Writing a zone down without counting pixels}}\label{index_main_capture}
+Guessing percentages is tedious, so {\bfseries{Ctrl+\+Alt+\+F11}} does it the other way round: arrange a window by hand and the line
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\{\ \textcolor{stringliteral}{"{}left"{}}:\ 2.03,\ \textcolor{stringliteral}{"{}top"{}}:\ 65.74,\ \textcolor{stringliteral}{"{}width"{}}:\ 96.15,\ \textcolor{stringliteral}{"{}height"{}}:\ 28.7\ \},}
+
+\end{DoxyCode}
+
+
+lands on the clipboard, indented and with its trailing comma, ready to be pasted between two zones. The tray menu entry {\itshape Copy zone of the active window} does the same for the window that was in front when the menu opened -\/ the way out when the hotkey belongs to something else.
+
+mfly::\+\+Zone\+From\+Window is the exact inverse of mfly::\+\+Apply\+Zone: it measures the visible frame, the same rectangle {\ttfamily Apply\+Zone} positions, so the invisible shadow border cancels out and the pasted line reproduces the window it was taken from. mfly::\+\+App\+Controller::\+\+Capture\+Zone measures the foreground window and falls back to the one under the cursor where that is not measurable.\hypertarget{index_main_monitor_layouts}{}\doxysubsection{\texorpdfstring{Layouts for one screen}{Layouts for one screen}}\label{index_main_monitor_layouts}
+Thirds are useful on an ultrawide panel and cramped on a laptop screen, so a layout can name the monitors it belongs on. Layout::\+monitors takes one selector or a list of them; without the key the layout shows up everywhere. mfly::\+\+Selector\+Matches accepts:
+
+
+\begin{DoxyTable}{2}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Selector  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Matches  \\
+{\ttfamily 1}, {\ttfamily 2}, ...  &the monitor number the flyout caption shows  \\
+{\ttfamily "{}primary"{}}  &the primary screen  \\
+{\ttfamily "{}secondary"{}}  &every screen that is not the primary one  \\
+{\ttfamily "{}\+DISPLAY2"{}}  &the device name; in full it needs JSON escaping: {\ttfamily "{}\textbackslash{}\textbackslash{}\textbackslash{}\textbackslash{}.\textbackslash{}\textbackslash{}\+DISPLAY2"{}}  \\
+{\ttfamily "{}3840x2160"{}}  &every screen with that resolution  \\
+{\ttfamily "{}\texorpdfstring{$\ast$}{*}"{}}  &every screen -\/ the default  \\
+\end{DoxyTable}
+
+
+Comparison ignores case and surrounding blanks, and the resolution accepts {\ttfamily x}, {\ttfamily X} and the multiplication sign, so a caption can be pasted straight out of the flyout. A screen that no layout applies to is left out of the flyout entirely -\/ which is also how a single screen can be excluded: give every layout an explicit list that omits it.
+
+The rules live in Monitor\+Selector.\+h, free of Windows dependencies, and are covered by {\ttfamily tests/\+\+Selector\+Test.\+cpp}.\hypertarget{index_main_detection}{}\doxysubsection{\texorpdfstring{How the button is located}{How the button is located}}\label{index_main_detection}
+{\ttfamily "{}button\+Detection"{}} chooses between the two ways of finding the minimize button, and {\ttfamily "{}auto"{}} walks them in order:
+
+
+\begin{DoxyTable}{2}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Value  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Meaning  \\
+{\ttfamily "{}auto"{}}  &ask the window; compute the position when it stays silent  \\
+{\ttfamily "{}hittest"{}}  &only ask -\/ a window with its own title bar is not detected  \\
+{\ttfamily "{}computed"{}}  &never ask, always compute  \\
+\end{DoxyTable}
+
+
+Asking means {\ttfamily WM\+\_\+\+NCHITTEST} and, on {\ttfamily HTMINBUTTON}, the edge search: exact, because the window itself draws the answer. It runs first and unconditionally
+\begin{DoxyItemize}
+\item no assumption of ours stands in front of it, because an assumption that is wrong would hide a window that answers perfectly well. Computing needs nobody\textquotesingle{}s cooperation and walks three sources, from precise to approximate (mfly::\+\+Probe\+Source):
+\end{DoxyItemize}
+\begin{DoxyEnumerate}
+\item {\ttfamily DWMWA\+\_\+\+CAPTION\+\_\+\+BUTTON\+\_\+\+BOUNDS} -\/ DWM reports the whole button block; it is divided into as many equal slots as the window styles call for.
+\item {\ttfamily Get\+Title\+Bar\+Info} -\/ an API, not a message, so it also answers for a foreign process. It yields the exact title bar strip; only the button width is then derived from its height.
+\item The visible frame plus the system caption height -\/ the last resort.
+\end{DoxyEnumerate}
+
+Which windows qualify is decided by the styles alone: {\ttfamily WS\+\_\+\+SYSMENU} and {\ttfamily WS\+\_\+\+MINIMIZEBOX} on a non-\/child window. {\ttfamily WS\+\_\+\+CAPTION} is deliberately not required -\/ an app that draws its own title bar usually drops it, and those are exactly the windows this path exists for (mfly::\+\+Caption\+Layout\+Of).
+
+Which source produced a rectangle is written to the log on every detection. If none of them does, the log notes the window class and the {\ttfamily HT} code the window returned, so "{}it does not work with this app"{} becomes a line that says why (mfly::\+\+App\+Controller::\+\+Log\+Detection\+Miss).
+
+The sibling message {\ttfamily WM\+\_\+\+GETTITLEBARINFOEX} would deliver the individual button rectangles in one go, but it carries a pointer into the receiving window\textquotesingle{}s address space and Windows is not documented to marshal it between processes. It is therefore deliberately not used.\hypertarget{index_main_diagnosis}{}\doxysubsection{\texorpdfstring{When a window stays undetected}{When a window stays undetected}}\label{index_main_diagnosis}
+Point at the button that does not react and press {\bfseries{Ctrl+\+Alt+\+F12}}: mfly::\+\+Diagnose\+Window walks the whole chain for the window under the cursor -\/ ignore list, styles, frame, region, hit-\/test answer, {\ttfamily Get\+Title\+Bar\+Info}, the DWM block, the computed rectangle -\/ and ends with a verdict naming the step that failed. The report goes to the clipboard and to {\ttfamily minflyout-\/diagnosis.\+txt} next to the configuration.
+
+It deliberately avoids the {\ttfamily WRITE\+\_\+\texorpdfstring{$\ast$}{*}\+\_\+\+LOG} macros: those are compiled out of a plain release build, and a diagnosis that only works in a debug build is no use when the problem appears in the release one. The report says on its second line which of the two builds is running, and carries mfly::\+\+Build\+Stamp so a stale EXE gives itself away.
+
+The report prints two DPI values, and telling them apart explains a whole class of failures. {\ttfamily Get\+Dpi\+For\+Window} answers with the DPI a window {\itshape thinks} in -\/ its awareness context -\/ which for an application that is not per-\/monitor aware is 96 however large DWM actually draws it. Min\+Flyout is {\ttfamily Per\+Monitor\+V2} and reads physical coordinates, so everything it measures against the glass uses the screen\textquotesingle{}s DPI instead (mfly::\+\+Dpi\+For\+Window\+Monitor). Where the two lines differ, the window is one of those applications; where the caption arithmetic once used the wrong one, its region came out at a fraction of its proper size and the pre-\/filter rejected a cursor that was sitting right on the button.
+
+{\ttfamily "{}trace\+Detection"{}}: {\ttfamily true} adds one line per gate of the detection, so a movement that never reaches the probe can be followed to the gate it died at.
+
+Two things silence the detection with no error at all: Windows removes a low-\/level hook whose owner did not answer within {\ttfamily Low\+Level\+Hooks\+Timeout} -\/ which happens to any process sitting at a debugger breakpoint -\/ and the one-\/message-\/at-\/a-\/time throttle would stay armed forever if its message were lost. mfly::\+\+App\+Controller::\+\+Check\+Hook\+Alive watches for both and calls mfly::\+\+Hook\+Thread::\+\+Revive.
+
+Watching the raw message traffic of a foreign window needs a hook inside that process -\/ that is what Spy++ does and what Min\+Flyout deliberately does not. Note that {\ttfamily spyxx.\+exe} only sees 32-\/bit processes; on an all-\/64-\/bit system it shows nothing at all and {\ttfamily spyxx\+\_\+amd64.\+exe} is the one to use.
+
+If the file is malformed, the application keeps working with the default values and reports line and column of the error -\/ in the flyout as an item and on reload as a balloon on the tray icon.\hypertarget{index_main_flyout}{}\doxysection{\texorpdfstring{What the flyout shows}{What the flyout shows}}\label{index_main_flyout}
+The upper part draws one row per monitor: a miniature for each layout that applies to that screen, in its aspect ratio, with the zones as tiles inside. Clicking a tile means "{}put the window on this monitor, into this zone"{} -\/ screen and position in a single click, because the hotspot carries its {\ttfamily HMONITOR} along (mfly::\+\+Apply\+Zone). Below the miniatures, separated by a line, come the text items from the providers.
+
+With more than one row each carries a caption -\/ number, device name, resolution and, on the screen the window is on, {\itshape }(current). Those are exactly the selectors mfly::\+\+Selector\+Matches understands, so the configuration can be written from what the flyout shows.
+
+A window without a sizing border cannot be tiled; for those the miniature area is omitted and only the text items appear. The same happens to a screen that no layout applies to -\/ it gets no row at all.
+
+On a small panel the flyout comes out small -\/ correct in millimetres and awkward to hit. {\ttfamily "{}ui\+Scale"{}} multiplies the DPI it is laid out for, so fonts, paddings and miniatures grow together; \doxysectlink{page_config_config_uiscale}{Making the flyout bigger}{1} has the details and the rule that keeps an over-\/eager factor from pushing the flyout off the screen.\hypertarget{index_main_touch}{}\doxysection{\texorpdfstring{Dragging a window into a zone by finger}{Dragging a window into a zone by finger}}\label{index_main_touch}
+The flyout is a menu: it is pointed at and clicked. The touch overlay is a target: it appears underneath a window that is already in motion and says where the window may be let go.
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{[None]\ ──window\ picked\ up\ by\ its\ caption──▶\ [Watching]\ ──finger\ rests──▶\ [Zones]}
+\DoxyCodeLine{\ \ \ ▲\ \ \ \ \ \ \ \ \ \ (contact,\ resizable)\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ │\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ │}
+\DoxyCodeLine{\ \ \ └──────────────────────────────────────────────┴─────────────────────────┘}
+\DoxyCodeLine{\ \ \ \ \ \ \ let\ go,\ ESC,\ or\ the\ move\ loop\ ended\ -\/\ a\ zone\ under\ the\ finger\ is\ applied}
+
+\end{DoxyCode}
+
+
+mfly::\+\+Zone\+Overlay draws two phases on one window: the trigger field configured by {\ttfamily touch.\+trigger}, and after {\ttfamily touch.\+dwell\+Ms} the zones of the touch layout across the whole monitor. It is layered, so DWM composites it and the window travelling underneath does not make it flicker; transparency is a color key plus one constant alpha rather than per-\/pixel alpha, which keeps ordinary {\ttfamily WM\+\_\+\+PAINT} drawing -\/ and with it the shared helpers in Painting.\+h -\/ working unchanged. GDI text writes no alpha channel, so per-\/pixel alpha would mean composing every label by hand.
+
+The drop waits for the loop to end. A window still finishing its move loop would overwrite anything positioned during it, so {\ttfamily MOVESIZEEND} is the signal; where an application never sends one, a short grace after the finger lifts applies the zone anyway, and the poll timer withdraws an overlay whose drag was lost altogether.
+
+Whether a press came from a finger is read from {\ttfamily MSLLHOOKSTRUCT::\+dw\+Extra\+Info}, which Windows stamps when it promotes a contact to a mouse message (mfly::\+\+From\+Pen\+Or\+Touch). Where that marker does not arrive, {\ttfamily "{}touch.\+also\+Mouse"{}} makes the route work for every drag regardless of what caused it -\/ which is also how the overlay is tried out on a machine without a touchscreen. \doxysectlink{page_config_config_touch}{The touch block}{1} lists the settings, \doxysectlink{page_config_config_ex_tablet}{A tablet that turns}{2} shows a tablet configured for both of its postures.\hypertarget{index_main_build}{}\doxysection{\texorpdfstring{Building}{Building}}\label{index_main_build}
+
+\begin{DoxyItemize}
+\item {\bfseries{Visual Studio 2022:}} open {\ttfamily Min\+Flyout.\+sln}, pick a configuration, F7. Projects: {\ttfamily minflyout} (EXE), {\ttfamily json\+\_\+tests} (the unit tests for the JSONC parser, the monitor selectors and the caption geometry, run immediately after building) and {\ttfamily docs} (generates this documentation; not built automatically). Shared settings live in {\ttfamily Min\+Flyout.\+props} -\/ in particular {\ttfamily /\+utf-\/8}, without which the UTF-\/8 literals are misinterpreted.
+\item {\bfseries{CMake:}} {\ttfamily "{}cmake -\/\+S . -\/\+B build"{}} and {\ttfamily "{}cmake --build build"{}}; {\ttfamily "{}ctest --test-\/dir build"{}} runs the unit tests, {\ttfamily "{}cmake --build build --target docs"{}} generates the documentation. Besides {\ttfamily json\+\_\+tests} there is {\ttfamily overlay\+\_\+tests} for the overlay arithmetic -\/ a separate target because it carries its own {\ttfamily main}, and because the three sources {\ttfamily json\+\_\+tests} names are not currently in the working tree.
+\end{DoxyItemize}\hypertarget{index_main_logging}{}\doxysection{\texorpdfstring{Logging}{Logging}}\label{index_main_logging}
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{WRITE\_INFO\_LOG(L\textcolor{stringliteral}{"{}Flyout\ opened"{}});\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{comment}{//\ message\ only}}
+\DoxyCodeLine{WRITE\_DEBUG\_LOG(L\textcolor{stringliteral}{"{}Button\ probed"{}},\ probeTime.ElapsedMs());\ \ \textcolor{comment}{//\ +\ duration}}
+\DoxyCodeLine{WRITE\_WARNING\_LOG(L\textcolor{stringliteral}{"{}Config\ rejected"{}},\ config.error);\ \ \ \ \ \ \ \textcolor{comment}{//\ +\ detail}}
+
+\end{DoxyCode}
+
+
+The macros in Log.\+h expand to mfly::\+log::\+\+Writer, which carries level, {\ttfamily \+\_\+\+\_\+\+FUNCTION\+\_\+\_}, {\ttfamily \+\_\+\+\_\+\+FILE\+\_\+\_} and {\ttfamily \+\_\+\+\_\+\+LINE\+\_\+\_}. They are compiled in when {\ttfamily \+\_\+\+DEBUG} or {\ttfamily \+\_\+\+RELEASE\+\_\+\+WITH\+\_\+\+DEBUG\+\_\+\+LOG} is defined; otherwise the arguments are discarded without being evaluated.
+
+Output goes to {\ttfamily Output\+Debug\+StringW}, and with {\ttfamily "{}log\+To\+File"{}}: {\ttfamily true} also to {\ttfamily \%APPDATA\%\textbackslash{}Min\+Flyout\textbackslash{}minflyout.\+log}. Every line is tab separated, has exactly eight columns and never leaves one empty -\/ {\ttfamily "{}-\/"{}} stands in:
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{time\ \ thread\ \ level\ \ duration\ \ message\ \ function\ \ file(line)\ \ detail}
+
+\end{DoxyCode}
+
+
+Nothing is logged from the hook callbacks or from the cheap pre-\/test that runs on every throttled mouse move.\hypertarget{index_main_logviewplus}{}\doxysubsection{\texorpdfstring{Reading the log in Log\+View\+Plus}{Reading the log in Log\+View\+Plus}}\label{index_main_logviewplus}
+Parser {\ttfamily Dsv\+Parser}, file name pattern {\ttfamily minflyout.\+log}, {\itshape "{}\+Is Reg\+Ex"{}} off, and these parser arguments -\/ the separators are real tab characters:
+
+
+\begin{DoxyCode}{0}
+\DoxyCodeLine{\%d\{yyyy-\/MM-\/dd\ HH:mm:ss.fff\}\ \ \%t\ \ \%p\ \ \%s\{Duration\}\ \ \ \ \%m\ \ \%c\ \ \%s\{Source\}\ \ \%S\{Detail\}}
+
+\end{DoxyCode}
+
+
+Log\+View\+Plus derives the delimiter from the pattern itself: the first non-\/space character that is not part of a specifier, here the tab. The eight columns map as follows.
+
+
+\begin{DoxyTable}{4}{}{}{1}
+\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}\#  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Content  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Specifier  &\SetCell{c,bg=\tableheadbgcolor,font=\bfseries}Why  \\
+1  &{\ttfamily 2026-\/08-\/19 22:14:07.\+913}  &{\ttfamily \%d\{yyyy-\/\+MM-\/dd HH:\+mm:ss.\+fff\}}  &{\ttfamily fff} matches exactly three digits  \\
+2  &thread id  &{\ttfamily \%t}  &tells the UI thread and the hook thread apart  \\
+3  &{\ttfamily DEBUG} {\ttfamily INFO} {\ttfamily WARN} {\ttfamily ERROR}  &{\ttfamily \%p}  &the level names Log\+View\+Plus knows  \\
+4  &duration in ms, or {\ttfamily -\/}  &{\ttfamily \%s\{Duration\}}  &own column, sortable  \\
+5  &message  &{\ttfamily \%m}  &may contain spaces  \\
+6  &function  &{\ttfamily \%c}  &mapped to the logger column, so filtering by origin works  \\
+7  &{\ttfamily App\+Controller.\+cpp(193)}  &{\ttfamily \%s\{Source\}}  &no spaces, own column  \\
+8  &detail, or {\ttfamily -\/}  &{\ttfamily \%S\{Detail\}}  &window titles contain spaces  \\
+\end{DoxyTable}
+
+
+{\ttfamily tools/\+minflyout-\/sample.\+log} holds ten representative lines -\/ one per level and one per overload -\/ for the {\itshape Testing} tab, so the parser can be checked without running the program.\hypertarget{index_main_icon}{}\doxysection{\texorpdfstring{Application icon}{Application icon}}\label{index_main_icon}
+Motif: the minimize stroke, with the unfolding flyout below it. The file {\ttfamily res/\+minflyout.\+ico} contains nine sizes from 16 to 256 px; the small ones are not downscaled but drawn separately (two instead of three menu rows, snapped to whole pixels). It is generated by {\ttfamily tools/\+build\+\_\+icon.\+py}; {\ttfamily res/\+icon.\+svg} is the editable template of the large size. Everything is bound in via {\ttfamily res/\+minflyout.\+rc}, which also carries the version info.\hypertarget{index_main_usage}{}\doxysection{\texorpdfstring{Usage}{Usage}}\label{index_main_usage}
+Hold the mouse over the minimize button -\/ the flyout unfolds below it. Leaving it, clicking elsewhere or ESC closes it again; a click on the button itself minimizes as usual.
+
+With a finger: drag a window by its title bar, rest it in the field that appears, and let go over one of the zones that unfold (\doxysectlink{index_main_touch}{Dragging a window into a zone by finger}{1}). Letting go anywhere else does nothing -\/ the drag stays an ordinary drag.
+
+Two hotkeys work anywhere: {\bfseries{Ctrl+\+Alt+\+F11}} copies the zone of the active window as a configuration line (\doxysectlink{index_main_capture}{Writing a zone down without counting pixels}{2}), {\bfseries{Ctrl+\+Alt+\+F12}} writes the detection diagnosis for the window under the cursor (\doxysectlink{index_main_diagnosis}{When a window stays undetected}{2}).
+
+A double click on the tray icon reloads the configuration -\/ that is the default action of the icon, and the menu marks the same command in bold. A right click opens the menu: {\itshape Paused}, {\itshape Restore all stashed windows}, {\itshape Open configuration}, {\itshape Reload configuration}, {\itshape Copy zone of the active window}, {\itshape Open diagnosis file} and {\itshape Exit}.\hypertarget{index_main_limits}{}\doxysection{\texorpdfstring{Limits}{Limits}}\label{index_main_limits}
+
+\begin{DoxyItemize}
+\item {\bfseries{UIPI:}} windows of processes with a higher integrity level do not answer {\ttfamily WM\+\_\+\+NCHITTEST}. For elevated windows Min\+Flyout itself has to run elevated.
+\item {\bfseries{Custom title bars:}} a window that answers {\ttfamily WM\+\_\+\+NCHITTEST} with {\ttfamily HTMINBUTTON} is measured exactly; for one that does not, the position is computed. The computation assumes the system layout -\/ one block of equally wide buttons flush in the upper right corner -\/ so an app that puts its buttons somewhere else stays out of reach. {\ttfamily "{}button\+Detection"{}} selects which of the two ways is used, and a failed detection is written to the log with the class name and the {\ttfamily HT} code the window returned.
+\item {\bfseries{Non-\/resizable windows}} (without {\ttfamily WS\+\_\+\+THICKFRAME}) show the size items greyed out, and cannot start a touch drag either.
+\item {\bfseries{A window that is not per-\/monitor DPI aware rests on the estimate alone.}} All three of the precise answers fail together on such a window, and each for its own reason: it reports 96 dpi however large DWM draws it, it answers {\ttfamily WM\+\_\+\+NCHITTEST} over its caption buttons with {\ttfamily HTCAPTION} rather than {\ttfamily HTMINBUTTON}, and {\ttfamily DWMWA\+\_\+\+CAPTION\+\_\+\+BUTTON\+\_\+\+BOUNDS} comes back in a coordinate space that mixes the window\textquotesingle{}s own scale with the screen\textquotesingle{}s -\/ a well-\/formed rectangle sitting in the middle of the caption, which is what the flush-\/edge test in mfly::\+\+Caption\+Block\+From\+Dwm exists to catch. What carries these windows is the last rung of the ladder: the visible frame plus the screen\textquotesingle{}s title bar height. It holds up in practice, but it is a computation, so this is the class of window most likely to need a Ctrl+\+Alt+\+F12 report.
+\item {\bfseries{The touch overlay stays on one screen.}} The trigger field follows the finger from monitor to monitor, but once the zones are unfolded they belong to the screen they opened on. Moving a window to another screen is what the flyout is for.
+\item {\bfseries{Touch is told from mouse by a marker}}, not by a separate input path, so the distinction is only as good as {\ttfamily MSLLHOOKSTRUCT::\+dw\+Extra\+Info}. Where it does not arrive, {\ttfamily "{}touch.\+also\+Mouse"{}} makes the route work regardless.
+\item {\bfseries{Stashed windows:}} mfly::\+\+Tray\+Stash restores them on exit and on {\ttfamily WM\+\_\+\+QUERYENDSESSION}; a crash of the host would leave them behind invisible. 
+\end{DoxyItemize}\input{page_config}

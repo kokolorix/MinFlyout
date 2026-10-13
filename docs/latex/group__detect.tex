@@ -1,0 +1,12 @@
+\doxysection{Detection }
+\hypertarget{group__detect}{}\label{group__detect}\index{Detection@{Detection}}
+
+
+Determining whether the mouse pointer is over a minimize button.  
+
+
+Determining whether the mouse pointer is over a minimize button. 
+
+Consists of two parts: mfly::\+\+Hook\+Thread delivers the mouse events without holding up the system input path, and Caption\+Probe.\+h answers via {\ttfamily WM\+\_\+\+NCHITTEST} the question of what lies under the pointer.
+
+mfly::\+\+Drag\+Watcher belongs here as the touch counterpart: a finger cannot hover a minimize button, so what is noticed instead is a window entering its move loop -\/ which Windows announces, and which needs no hook in the input path at all. 
