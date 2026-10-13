@@ -55,6 +55,30 @@ public:
     void SetKeyboardHookEnabled(bool enabled);
 
     /**
+     * \brief Lets the keyboard hook steer the open flyout.
+     *
+     * While on, Tab, the arrow keys, Home and End are swallowed and reported as
+     * \ref WM_MFLY_KEY - the flyout never takes the focus, so the hook is the
+     * only place its keys can come from. Enter and Space join them only once
+     * the flyout has a keyboard focus to act on: \p focused says so from the
+     * start (opened from the keyboard), and the first navigation key sets it
+     * (opened by hovering). Until then a flyout that merely popped up under a
+     * resting pointer does not eat the Enter meant for the window below.
+     *
+     * Nothing is taken while Ctrl, Alt or Win is held, so Alt+Tab, Ctrl+Tab
+     * and the resize hotkeys keep working. A key whose key-down was swallowed
+     * has its key-up swallowed too, so the window below never sees half a
+     * keystroke.
+     *
+     * Only has an effect while the hook is installed, see
+     * \ref SetKeyboardHookEnabled.
+     *
+     * \param enabled \c true while a flyout is open.
+     * \param focused \c true if Enter and Space should act right away.
+     */
+    void SetKeyNavigation(bool enabled, bool focused);
+
+    /**
      * \brief Suspends the evaluation of mouse events.
      *
      * The hook stays installed but no longer posts anything.

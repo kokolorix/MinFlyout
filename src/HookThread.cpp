@@ -22,6 +22,65 @@ std::atomic<bool> g_paused{false};
 std::atomic<bool> g_movePending{false};
 std::atomic<bool> g_keyHookActive{false};
 
+/// The open flyout takes navigation keys, see HookThread::SetKeyNavigation.
+std::atomic<bool> g_keyNav{false};
+/// Enter and Space have something to act on.
+std::atomic<bool> g_keyFocus{false};
+
+/**
+ * \brief Keys whose key-down the hook swallowed.
+ *
+ * Their key-up is swallowed as well, even if the flyout closed in between -
+ * Enter closes it, and the window below would otherwise receive a lone
+ * \c WM_KEYUP. Only ever touched on the hook thread.
+ */
+bool g_swallowedDown[256] = {};
+
+/**
+ * \brief The hook was asked to go while a swallowed key was still down.
+ *
+ * Enter closes the flyout on its key-down; removing the hook right then would
+ * hand the key-up to the window below. So the hook stays until the last
+ * swallowed key is released and then removes itself. Hook thread only.
+ */
+bool g_unhookWhenReleased = false;
+
+/// \return \c true while any swallowed key has not been released yet.
+bool AnySwallowed() {
+    for (bool held : g_swallowedDown) {
+        if (held) return true;
+    }
+    return false;
+}
+
+/// \return \c true for the keys that move the keyboard focus in the flyout.
+bool IsNavigationKey(DWORD vk) {
+    switch (vk) {
+    case VK_TAB: case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
+    case VK_HOME: case VK_END:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// \return \c true for the keys that invoke the focused element.
+bool IsInvokeKey(DWORD vk) {
+    return vk == VK_RETURN || vk == VK_SPACE;
+}
+
+/**
+ * \brief Ctrl, Alt or Win is held - the key belongs to someone else.
+ * \param kb The key event.
+ * \return \c true if navigation has to keep its hands off.
+ */
+bool ChordHeld(const KBDLLHOOKSTRUCT& kb) {
+    if (kb.flags & LLKHF_ALTDOWN) return true;
+    return (::GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
+           (::GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 ||
+           (::GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+}
+
 /// Mouse movements the callback saw - the proof that the hook still fires.
 std::atomic<unsigned long long> g_movesSeen{0};
 /// Movements actually posted to the controller.
@@ -149,13 +208,42 @@ LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
 }
 
 LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam) {
-    if (code == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
-        auto* kb = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
-        HWND owner = g_owner.load(std::memory_order_relaxed);
-        if (kb && kb->vkCode == VK_ESCAPE && owner &&
-            g_keyHookActive.load(std::memory_order_relaxed)) {
+    auto* kb = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+    if (code != HC_ACTION || !kb) return ::CallNextHookEx(nullptr, code, wParam, lParam);
+
+    const DWORD vk = kb->vkCode & 0xFF;
+    const bool down = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
+    const bool up = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
+
+    if (up && g_swallowedDown[vk]) {
+        g_swallowedDown[vk] = false;
+        if (g_unhookWhenReleased && !AnySwallowed()) {
+            // Not from inside the callback - through the thread's own queue.
+            ::PostThreadMessageW(::GetCurrentThreadId(), WM_HOOK_SETKEY, 0, 0);
+        }
+        return 1;
+    }
+
+    HWND owner = g_owner.load(std::memory_order_relaxed);
+    if (down && owner && g_keyHookActive.load(std::memory_order_relaxed)) {
+        if (vk == VK_ESCAPE) {
             ::PostMessageW(owner, WM_MFLY_CANCEL, 0, 0);
+            g_swallowedDown[vk] = true;
             return 1;  // ESC only closes the flyout and is not passed on
+        }
+
+        if (g_keyNav.load(std::memory_order_relaxed) && !ChordHeld(*kb)) {
+            const bool navigate = IsNavigationKey(vk);
+            const bool invoke = IsInvokeKey(vk) && g_keyFocus.load(std::memory_order_relaxed);
+            if (navigate || invoke) {
+                // Set here and not by the UI thread: Right followed quickly by
+                // Enter must not race the posted message that sets the focus.
+                if (navigate) g_keyFocus.store(true, std::memory_order_relaxed);
+                const bool shift = (::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                ::PostMessageW(owner, WM_MFLY_KEY, vk, shift ? 1 : 0);
+                g_swallowedDown[vk] = true;
+                return 1;
+            }
         }
     }
     return ::CallNextHookEx(nullptr, code, wParam, lParam);
@@ -249,6 +337,11 @@ void HookThread::SetKeyboardHookEnabled(bool enabled) {
     ::PostThreadMessageW(threadId_, WM_HOOK_SETKEY, enabled ? 1u : 0u, 0);
 }
 
+void HookThread::SetKeyNavigation(bool enabled, bool focused) {
+    g_keyFocus.store(enabled && focused, std::memory_order_relaxed);
+    g_keyNav.store(enabled, std::memory_order_relaxed);
+}
+
 DWORD WINAPI HookThread::ThreadMain(LPVOID param) {
     static_cast<HookThread*>(param)->Run();
     return 0;
@@ -290,9 +383,18 @@ void HookThread::Run() {
             if (enable && !g_keyHook) {
                 g_keyHook = ::SetWindowsHookExW(WH_KEYBOARD_LL, &KeyboardProc,
                                                 ::GetModuleHandleW(nullptr), 0);
-            } else if (!enable && g_keyHook) {
+                g_unhookWhenReleased = false;
+            } else if (enable) {
+                g_unhookWhenReleased = false;
+            } else if (g_keyHook) {
+                if (g_keyHookActive.load(std::memory_order_relaxed)) continue;  // re-enabled since
+                if (AnySwallowed()) {
+                    g_unhookWhenReleased = true;  // see there
+                    continue;
+                }
                 ::UnhookWindowsHookEx(g_keyHook);
                 g_keyHook = nullptr;
+                g_unhookWhenReleased = false;
             }
             continue;
         }
