@@ -55,6 +55,14 @@ constexpr const char* kTemplate =
     "  // back where the result would not fit on the screen. Range 0.75 to 3.\n"
     "  \"uiScale\": 1.0,\n"
     "\n"
+    "  // Opens the flyout for the active window from the keyboard - below its\n"
+    "  // minimize button, as if the pointer had rested there. The same keys\n"
+    "  // again, Esc, a click elsewhere or switching windows close it.\n"
+    "  // Modifiers: Ctrl, Alt, Shift, Win. Keys: A-Z, 0-9, F1-F24, Space,\n"
+    "  // Enter, Tab, Insert, Delete, Home, End, PageUp, PageDown, arrows.\n"
+    "  // An empty string \"\" switches it off.\n"
+    "  \"openHotkey\": \"Ctrl+Alt+Z\",\n"
+    "\n"
     "  // How the minimize button is located.\n"
     "  //   \"auto\"      ask the window, and compute the position when it stays\n"
     "  //               silent - which is what apps with their own title bar do\n"
@@ -606,6 +614,16 @@ bool ConfigStore::ParseInto(const std::wstring& text, Config& out) {
         out.error = L"\"buttonDetection\" must be \"auto\", \"hittest\" or \"computed\".";
         return false;
     }
+
+    const std::wstring hotkey = root.text(L"openHotkey", L"Ctrl+Alt+Z");
+    HotkeyChord chord;
+    std::wstring hotkeyError;
+    if (!ParseHotkey(hotkey, chord, &hotkeyError)) {
+        out.error = L"\"openHotkey\": " + hotkeyError + L".";
+        return false;
+    }
+    out.openHotkey = hotkey;
+    out.openChord = chord;
 
     if (!ReadTouch(root, out)) return false;
     if (!ReadResize(root, out)) return false;

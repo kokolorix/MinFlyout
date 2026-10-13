@@ -6,6 +6,7 @@
 #pragma once
 
 #include "Common.h"
+#include "Hotkey.h"
 
 namespace mfly {
 
@@ -201,6 +202,20 @@ struct Config {
      * where the result would not fit on the screen.
      */
     double uiScale = 1.0;
+
+    /**
+     * \brief Key combination that opens the flyout for the foreground window.
+     *
+     * The keyboard route to everything the hover opens: the flyout appears
+     * below the minimize button of the active window, as if the pointer had
+     * rested there. Pressing the combination again, Esc, a click elsewhere or
+     * switching to another window closes it. Spelled as \ref mfly::ParseHotkey
+     * reads it; an empty string switches the hotkey off.
+     */
+    std::wstring openHotkey = L"Ctrl+Alt+Z";
+
+    /// \ref openHotkey, parsed. Empty when the hotkey is switched off.
+    HotkeyChord openChord{kHotkeyCtrl | kHotkeyAlt, 'Z'};
 
     std::vector<Layout> layouts;         ///< Configured layouts.
     TouchConfig touch;                   ///< Drag-to-zone by finger.

@@ -91,6 +91,7 @@ if exist P:\Sachen\SW\Tools\$(ProjectName)\$(Platform) (
     <ClCompile Include="src\DragWatcher.cpp" />
     <ClCompile Include="src\FlyoutWindow.cpp" />
     <ClCompile Include="src\HookThread.cpp" />
+    <ClCompile Include="src\Hotkey.cpp" />
     <ClCompile Include="src\ItemRegistry.cpp" />
     <ClCompile Include="src\Json.cpp" />
     <ClCompile Include="src\Log.cpp" />
@@ -114,6 +115,7 @@ if exist P:\Sachen\SW\Tools\$(ProjectName)\$(Platform) (
     <ClInclude Include="src\DragWatcher.h" />
     <ClInclude Include="src\FlyoutWindow.h" />
     <ClInclude Include="src\HookThread.h" />
+    <ClInclude Include="src\Hotkey.h" />
     <ClInclude Include="src\ItemRegistry.h" />
     <ClInclude Include="src\Json.h" />
     <ClInclude Include="src\Log.h" />

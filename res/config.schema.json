@@ -141,6 +141,13 @@
       "default": 1,
       "description": "Size factor of the flyout, on top of the scaling Windows already does for the screen resolution. 1.0 is the normal size; around 1.4 is a good starting point on a small laptop panel. Fonts, paddings and miniatures grow together, and the factor is reduced where the result would not fit on the screen."
     },
+    "openHotkey": {
+      "type": "string",
+      "default": "Ctrl+Alt+Z",
+      "pattern": "^\\s*$|^\\s*([A-Za-z0-9]+\\s*\\+\\s*)*[A-Za-z0-9]+\\s*$",
+      "examples": ["Ctrl+Alt+Z", "Win+Shift+F10", "Ctrl+Alt+Space", ""],
+      "description": "Opens the flyout for the active window from the keyboard, below its minimize button. The same keys again, Esc, a click elsewhere or switching windows close it. Modifiers: Ctrl, Alt, Shift, Win. Keys: A-Z, 0-9, F1-F24, Space, Enter, Tab, Backspace, Insert, Delete, Home, End, PageUp, PageDown, Up, Down, Left, Right, Pause. A key other than F1-F24 needs Ctrl, Alt or Win; Esc is not allowed. An empty string switches the hotkey off."
+    },
     "buttonDetection": {
       "type": "string",
       "enum": ["auto", "hittest", "computed"],

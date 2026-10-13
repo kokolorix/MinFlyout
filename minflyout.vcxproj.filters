@@ -39,6 +39,9 @@
     <ClCompile Include="src\HookThread.cpp">
       <Filter>Detection</Filter>
     </ClCompile>
+    <ClCompile Include="src\Hotkey.cpp">
+      <Filter>Configuration</Filter>
+    </ClCompile>
     <ClCompile Include="src\DragWatcher.cpp">
       <Filter>Detection</Filter>
     </ClCompile>
@@ -106,6 +109,9 @@
     </ClInclude>
     <ClInclude Include="src\HookThread.h">
       <Filter>Detection</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Hotkey.h">
+      <Filter>Configuration</Filter>
     </ClInclude>
     <ClInclude Include="src\DragWatcher.h">
       <Filter>Detection</Filter>

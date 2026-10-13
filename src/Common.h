@@ -48,6 +48,7 @@ enum : UINT {
     WM_MFLY_DRAGEND   = WM_APP + 11, ///< That loop ended (\c lParam = HWND).
     WM_MFLY_WHEEL     = WM_APP + 12, ///< Wheel turned (\c wParam = +1 up, -1 down).
     WM_MFLY_TOOL      = WM_APP + 13, ///< Flyout reports the chosen resize button (\c wParam = index).
+    WM_MFLY_KEY       = WM_APP + 14, ///< Navigation key for the open flyout (\c wParam = virtual key, \c lParam = 1 with Shift).
 };
 
 /** \name Modifier keys of a mouse event
