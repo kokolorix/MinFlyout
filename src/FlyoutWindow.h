@@ -89,6 +89,11 @@ struct ZoneHotspot {
  *
  * Clicks are not handled here: the window posts \ref WM_MFLY_ZONE or
  * \ref WM_MFLY_INVOKE with the index to the controller.
+ *
+ * The keyboard reaches it the same way, through the controller: the window
+ * never has the focus, so the low-level hook reports the keys and
+ * \ref HandleKey moves the highlight. Keyboard focus and mouse hover are one
+ * and the same highlight, the way a menu does it - whichever moved last wins.
  */
 class FlyoutWindow {
 public:
@@ -147,6 +152,39 @@ public:
 
     /// \return The resize buttons most recently passed to \ref Show.
     const std::vector<ResizeCommand>& tools() const { return content_.tools; }
+
+    /**
+     * \brief Puts the keyboard focus on its starting point.
+     *
+     * The first zone of the monitor the window is on; without one, the first
+     * zone of any monitor; without layouts at all, the first element there is.
+     * Called when the flyout was opened from the keyboard, and by the first
+     * navigation key of a flyout the hover opened.
+     */
+    void FocusFirst();
+
+    /**
+     * \brief Moves the keyboard focus or acts on it.
+     *
+     * The flyout is a sequence of groups: the resize toolbar, one group per
+     * monitor row, the text items.
+     *
+     * | Key | Effect |
+     * |---|---|
+     * | Tab / Shift+Tab | next / previous group, wrapping around |
+     * | Right, Down / Left, Up | next / previous element of the group, wrapping |
+     * | Home / End | first / last element of the group |
+     * | Enter, Space | as a click on the focused element |
+     *
+     * Moving from one monitor row to the next keeps the position - the second
+     * zone of the first layout stays the second zone of the first layout - so
+     * "same place, other screen" is a single Tab. Any other group is entered
+     * where it was left, or at its first element.
+     *
+     * \param vk    Virtual key code, as \ref WM_MFLY_KEY carries it.
+     * \param shift \c true if Shift was held.
+     */
+    void HandleKey(UINT vk, bool shift);
 
 private:
     /**
@@ -238,6 +276,40 @@ private:
     /// Draws the resize toolbar and the caption line below it.
     void PaintToolbar(HDC dc);
 
+    /// What kind of element a navigation group holds.
+    enum class NavKind { Tool, Zone, Item };
+
+    /// One stop of the Tab key.
+    struct NavGroup {
+        NavKind kind = NavKind::Item;  ///< Which highlight the elements use.
+        std::vector<int> elements;     ///< Indices into toolRects_, hotspots_ or the items.
+        bool monitor = false;          ///< A monitor row.
+        size_t row = 0;                ///< FlyoutContent::rows index, for a monitor row.
+    };
+
+    /// \return The groups in Tab order; empty groups are left out.
+    std::vector<NavGroup> NavGroups() const;
+
+    /**
+     * \brief Locates the highlighted element among the groups.
+     * \param[in]  groups Result of \ref NavGroups.
+     * \param[out] group  Index into \p groups.
+     * \param[out] offset Index into that group's elements.
+     * \return \c false if nothing is highlighted.
+     */
+    bool FindFocus(const std::vector<NavGroup>& groups, size_t& group, size_t& offset) const;
+
+    /**
+     * \brief Highlights one element and clears the other two kinds.
+     * \param groups Result of \ref NavGroups.
+     * \param group  Index into \p groups.
+     * \param offset Index into that group's elements.
+     */
+    void FocusAt(const std::vector<NavGroup>& groups, size_t group, size_t offset);
+
+    /// Posts the notification a click on the highlighted element would post.
+    void ActivateFocus();
+
     HWND   hwnd_ = nullptr;      ///< Own window.
     HWND   notify_ = nullptr;    ///< Recipient of the notifications (controller).
     HFONT  font_ = nullptr;      ///< Normal UI font.
@@ -248,6 +320,14 @@ private:
     int    hotZone_ = -1;        ///< Index of the highlighted zone, or -1.
     int    hotTool_ = -1;        ///< Index of the highlighted resize button, or -1.
     bool   tracking_ = false;    ///< \c TrackMouseEvent is running.
+    POINT  lastMousePt_{-32000, -32000}; ///< Client position of the last real mouse move.
+
+    /**
+     * \brief Where each navigation group was left, by group index.
+     *
+     * Valid for one \ref Show: the groups do not change while the flyout is up.
+     */
+    std::vector<size_t> navMemory_;
     bool   dark_ = false;        ///< Dark mode active.
 
     FlyoutContent content_;              ///< Current content.

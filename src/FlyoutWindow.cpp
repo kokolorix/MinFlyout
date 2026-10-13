@@ -270,6 +270,7 @@ void FlyoutWindow::Show(FlyoutContent content, const RECT& anchor, UINT dpi, dou
     hotItem_ = -1;
     hotZone_ = -1;
     hotTool_ = -1;
+    navMemory_.clear();
 
     MONITORINFO mi{};
     mi.cbSize = sizeof(mi);
@@ -327,6 +328,14 @@ void FlyoutWindow::Show(FlyoutContent content, const RECT& anchor, UINT dpi, dou
     HRGN rgn = ::CreateRoundRectRgn(0, 0, size.cx + 1, size.cy + 1,
                                     Scale(kCornerRad, dpi_) * 2, Scale(kCornerRad, dpi_) * 2);
     ::SetWindowRgn(hwnd_, rgn, FALSE);  // the window takes ownership
+
+    // Windows sends a WM_MOUSEMOVE when a window appears under a resting
+    // pointer. That is no movement, and it must not wipe out the keyboard
+    // focus a flyout opened from the keyboard is about to get.
+    POINT cursor{};
+    if (::GetCursorPos(&cursor)) {
+        lastMousePt_ = POINT{cursor.x - x, cursor.y - y};
+    }
 
     ::SetWindowPos(hwnd_, HWND_TOPMOST, x, y, size.cx, size.cy,
                    SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -618,6 +627,158 @@ void FlyoutWindow::Paint(HDC target) {
     ::DeleteDC(mem);
 }
 
+// --- Keyboard navigation ---------------------------------------------------
+
+std::vector<FlyoutWindow::NavGroup> FlyoutWindow::NavGroups() const {
+    std::vector<NavGroup> groups;
+
+    NavGroup tools;
+    tools.kind = NavKind::Tool;
+    for (size_t i = 0; i < toolRects_.size(); ++i) tools.elements.push_back(static_cast<int>(i));
+    if (!tools.elements.empty()) groups.push_back(std::move(tools));
+
+    // The hotspots of a row are contiguous: they follow its miniatures, which
+    // follow the rows. A tile cut away entirely (a zone reaching off its
+    // screen by all but a sliver) has nothing to show the focus on.
+    for (size_t r = 0; r < content_.rows.size() && r < miniFirst_.size(); ++r) {
+        const size_t firstMini = miniFirst_[r];
+        const size_t endMini = firstMini + content_.rows[r].layouts.size();
+        if (firstMini >= zoneFirst_.size()) continue;
+        const size_t begin = zoneFirst_[firstMini];
+        const size_t end = endMini < zoneFirst_.size() ? zoneFirst_[endMini] : hotspots_.size();
+
+        NavGroup row;
+        row.kind = NavKind::Zone;
+        row.monitor = true;
+        row.row = r;
+        for (size_t i = begin; i < end && i < hotspots_.size(); ++i) {
+            if (!::IsRectEmpty(&hotspots_[i].rect)) row.elements.push_back(static_cast<int>(i));
+        }
+        if (!row.elements.empty()) groups.push_back(std::move(row));
+    }
+
+    NavGroup items;
+    items.kind = NavKind::Item;
+    for (size_t i = 0; i < content_.items.size(); ++i) {
+        const Item& item = content_.items[i];
+        if (item.separator() || item.disabled()) continue;
+        items.elements.push_back(static_cast<int>(i));
+    }
+    if (!items.elements.empty()) groups.push_back(std::move(items));
+
+    return groups;
+}
+
+bool FlyoutWindow::FindFocus(const std::vector<NavGroup>& groups, size_t& group,
+                             size_t& offset) const {
+    for (size_t g = 0; g < groups.size(); ++g) {
+        const int hot = groups[g].kind == NavKind::Tool ? hotTool_
+                      : groups[g].kind == NavKind::Zone ? hotZone_
+                                                        : hotItem_;
+        if (hot < 0) continue;
+        for (size_t e = 0; e < groups[g].elements.size(); ++e) {
+            if (groups[g].elements[e] == hot) {
+                group = g;
+                offset = e;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void FlyoutWindow::FocusAt(const std::vector<NavGroup>& groups, size_t group, size_t offset) {
+    if (group >= groups.size() || groups[group].elements.empty()) return;
+    const NavGroup& target = groups[group];
+    offset = std::min(offset, target.elements.size() - 1);
+    const int index = target.elements[offset];
+
+    SetHotTool(target.kind == NavKind::Tool ? index : -1);
+    SetHotZone(target.kind == NavKind::Zone ? index : -1);
+    SetHotItem(target.kind == NavKind::Item ? index : -1);
+
+    if (navMemory_.size() < groups.size()) navMemory_.resize(groups.size(), 0);
+    navMemory_[group] = offset;
+}
+
+void FlyoutWindow::FocusFirst() {
+    const std::vector<NavGroup> groups = NavGroups();
+    if (groups.empty()) return;
+
+    size_t start = groups.size();
+    for (size_t g = 0; g < groups.size(); ++g) {
+        if (!groups[g].monitor) continue;
+        if (groups[g].row == content_.currentRow) { start = g; break; }
+        if (start == groups.size()) start = g;  // first monitor row, as a fallback
+    }
+    if (start == groups.size()) start = 0;
+    FocusAt(groups, start, 0);
+}
+
+void FlyoutWindow::ActivateFocus() {
+    if (!notify_) return;
+    if (hotTool_ >= 0) {
+        ::PostMessageW(notify_, WM_MFLY_TOOL, static_cast<WPARAM>(hotTool_), 0);
+    } else if (hotZone_ >= 0) {
+        ::PostMessageW(notify_, WM_MFLY_ZONE, static_cast<WPARAM>(hotZone_), 0);
+    } else if (hotItem_ >= 0) {
+        ::PostMessageW(notify_, WM_MFLY_INVOKE, static_cast<WPARAM>(hotItem_), 0);
+    }
+}
+
+void FlyoutWindow::HandleKey(UINT vk, bool shift) {
+    if (!IsVisible()) return;
+
+    const std::vector<NavGroup> groups = NavGroups();
+    if (groups.empty()) return;
+
+    size_t group = 0;
+    size_t offset = 0;
+    if (!FindFocus(groups, group, offset)) {
+        // Nothing highlighted yet - the hover opened the flyout, or the pointer
+        // left it. The first key only shows where the focus is; acting on it
+        // would be acting on something the user has not seen.
+        FocusFirst();
+        return;
+    }
+
+    const size_t count = groups[group].elements.size();
+    switch (vk) {
+    case VK_TAB: {
+        const size_t n = groups.size();
+        const size_t next = shift ? (group + n - 1) % n : (group + 1) % n;
+        size_t at = 0;
+        if (groups[group].monitor && groups[next].monitor) {
+            at = offset;  // same place, other screen; FocusAt clamps
+        } else if (next < navMemory_.size()) {
+            at = navMemory_[next];
+        }
+        FocusAt(groups, next, at);
+        return;
+    }
+    case VK_RIGHT:
+    case VK_DOWN:
+        FocusAt(groups, group, (offset + 1) % count);
+        return;
+    case VK_LEFT:
+    case VK_UP:
+        FocusAt(groups, group, (offset + count - 1) % count);
+        return;
+    case VK_HOME:
+        FocusAt(groups, group, 0);
+        return;
+    case VK_END:
+        FocusAt(groups, group, count - 1);
+        return;
+    case VK_RETURN:
+    case VK_SPACE:
+        ActivateFocus();
+        return;
+    default:
+        return;
+    }
+}
+
 LRESULT CALLBACK FlyoutWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     FlyoutWindow* self = nullptr;
     if (msg == WM_NCCREATE) {
@@ -650,6 +811,10 @@ LRESULT FlyoutWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_MOUSEMOVE: {
         POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        // Synthesized moves (window shown, content repainted) repeat the last
+        // position. Only a real movement takes the highlight from the keyboard.
+        if (pt.x == lastMousePt_.x && pt.y == lastMousePt_.y) return 0;
+        lastMousePt_ = pt;
         SetHotTool(HitTestTool(pt));
         SetHotZone(HitTestZone(pt));
         SetHotItem(HitTestItem(pt));
@@ -662,6 +827,7 @@ LRESULT FlyoutWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_MOUSELEAVE:
         tracking_ = false;
+        lastMousePt_ = POINT{-32000, -32000};
         SetHotTool(-1);
         SetHotZone(-1);
         SetHotItem(-1);
