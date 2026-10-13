@@ -6,6 +6,10 @@
 #include <windows.h>
 #include "resource.h"
 
+// Written by tools/GenerateVersion.ps1 before every build (Visual Studio:
+// pre-build event, CMake: the "version" target). Not under version control.
+#include "Version.h"
+
 // Explorer uses the numerically lowest icon resource as the file icon -
 // that is why the application icon stands alone and comes first.
 IDI_APPICON ICON "minflyout.ico"
@@ -18,13 +22,13 @@ CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "minflyout.manifest"
 #endif
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION    1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION    VER_FILEVERSION
+ PRODUCTVERSION VER_PRODUCTVERSION
  FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
 #ifdef _DEBUG
- FILEFLAGS      VS_FF_DEBUG
+ FILEFLAGS      VS_FF_DEBUG | VER_FILEFLAGS_DIRTY
 #else
- FILEFLAGS      0x0L
+ FILEFLAGS      VER_FILEFLAGS_DIRTY
 #endif
  FILEOS         VOS_NT_WINDOWS32
  FILETYPE       VFT_APP
@@ -34,12 +38,18 @@ BEGIN
     BEGIN
         BLOCK "040904b0"          // US English, Unicode
         BEGIN
-            VALUE "FileDescription", "MinFlyout - flyout above the minimize button"
-            VALUE "FileVersion",     "1.0.0.0"
+            // Composed by the generator: windres does not join adjacent
+            // string literals the way rc.exe does.
+            VALUE "FileDescription", VER_FILEDESCRIPTION_STR
+            VALUE "FileVersion",     VER_FILEVERSION_STR
             VALUE "InternalName",    "minflyout"
+            VALUE "LegalCopyright",  "Copyright (c) 2026"
             VALUE "OriginalFilename","minflyout.exe"
+#if VER_DIRTY
+            VALUE "PrivateBuild",    "Built from a working tree with uncommitted changes"
+#endif
             VALUE "ProductName",     "MinFlyout"
-            VALUE "ProductVersion",  "1.0.0.0"
+            VALUE "ProductVersion",  VER_PRODUCTVERSION_STR
         END
     END
     BLOCK "VarFileInfo"

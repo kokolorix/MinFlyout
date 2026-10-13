@@ -169,6 +169,9 @@
     <ClInclude Include="res\resource.h">
       <Filter>Resources</Filter>
     </ClInclude>
+    <ClInclude Include="res\Version.h">
+      <Filter>Resources</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="res\minflyout.manifest">
@@ -217,5 +220,7 @@
     </None>
     <None Include="tools\Debug-Log.cmd" />
     <None Include="tools\Debug-Log.ps1" />
+    <None Include="tools\GenerateVersion.ps1" />
+    <None Include="Version.txt" />
   </ItemGroup>
 </Project>

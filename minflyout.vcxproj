@@ -53,6 +53,13 @@
     <!-- The log viewer (tray menu "Open log as HTML") looks for its scripts
          next to the executable. Release additionally deploys to pCloud when
          the drive is there, ending a running copy first so it can be replaced. -->
+    <!-- res\Version.h and Version.doxyfile from Version.txt and git, as
+         ClipWatch does it. The script rewrites a file only when its content
+         changes. -->
+    <PreBuildEvent>
+      <Command>powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(ProjectDir)tools\GenerateVersion.ps1" -ProjectDir "$(ProjectDir)." -OutputPath "$(ProjectDir)res\Version.h" -DoxygenPath "$(ProjectDir)Version.doxyfile" -VersionFile "$(ProjectDir)Version.txt"</Command>
+      <Message>Generating res\Version.h and Version.doxyfile from Version.txt and git</Message>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command Condition="'$(Configuration)'=='Debug'">
 xcopy /Y /D /Q "$(ProjectDir)tools\Debug-Log.cmd" "$(TargetDir)" &gt;nul
@@ -130,6 +137,7 @@ if exist P:\Sachen\SW\Tools\$(ProjectName)\$(Platform) (
     <ClInclude Include="src\WindowSizer.h" />
     <ClInclude Include="src\ZoneOverlay.h" />
     <ClInclude Include="res\resource.h" />
+    <ClInclude Include="res\Version.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- application icon and version info -->
@@ -146,6 +154,8 @@ if exist P:\Sachen\SW\Tools\$(ProjectName)\$(Platform) (
     <None Include="tools\build_icon.py" />
     <None Include="tools\Debug-Log.cmd" />
     <None Include="tools\Debug-Log.ps1" />
+    <None Include="tools\GenerateVersion.ps1" />
+    <None Include="Version.txt" />
   </ItemGroup>
   <ItemGroup>
     <!-- Bound in automatically by the manifest tool:

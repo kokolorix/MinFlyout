@@ -9,6 +9,7 @@
 
 #include <format>
 
+#include "AboutDialog.h"  // VersionString, CommitDescription
 #include "CaptionProbe.h"
 #include "Config.h"
 #include "HookThread.h"
@@ -171,6 +172,7 @@ bool LoggingCompiledIn() {
 std::wstring DiagnoseWindow(HWND window, POINT pt) {
     std::wstring out;
     out += L"MinFlyout diagnosis\r\n";
+    out += std::format(L"  version          {}  {}\r\n", VersionString(), CommitDescription());
     out += std::format(L"  build            {}\r\n", BuildStamp());
     out += std::format(L"  logging          {}\r\n",
                        LoggingCompiledIn()
