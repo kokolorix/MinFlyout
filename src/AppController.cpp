@@ -18,6 +18,7 @@
 #include "SettingsBackup.h"
 #include "TrayStash.h"
 #include "WindowSizer.h"
+#include "AboutDialog.h"
 #include "resource.h"
 
 namespace mfly {
@@ -35,6 +36,8 @@ constexpr UINT kMenuCompareConfig = 108; ///< Menu command: diff the share again
 constexpr UINT kMenuOpenLog = 109;   ///< Menu command: open the log file.
 constexpr UINT kMenuOpenLogFolder = 110; ///< Menu command: show the log file in Explorer.
 constexpr UINT kMenuOpenLogHtml = 111;   ///< Menu command: interactive HTML view of the log.
+constexpr UINT kMenuOpenFlyout = 112;    ///< Menu command: open the flyout for the active window.
+constexpr UINT kMenuAbout = 113;         ///< Menu command: About dialog.
 constexpr UINT kMenuExit = 104;      ///< Menu command: exit.
 
 /// ID of the diagnosis hotkey (Ctrl+Alt+F12).
@@ -55,6 +58,9 @@ constexpr int kHotkeyNarrow    = 4;  ///< Ctrl+Alt+Left.
 constexpr int kHotkeyTaller    = 5;  ///< Ctrl+Alt+Down.
 constexpr int kHotkeyShorter   = 6;  ///< Ctrl+Alt+Up.
 constexpr int kHotkeyFullWidth = 7;  ///< Ctrl+Alt+Shift+Right.
+
+/// ID of the hotkey that opens the flyout (Config::openHotkey, Ctrl+Alt+Z by default).
+constexpr int kHotkeyOpen = 8;
 /** @} */
 
 /// The resize hotkeys in the order \ref AppController::resizeHotkeys_ stores them.
@@ -251,6 +257,19 @@ bool AppController::Init(HINSTANCE instance) {
                           L"dragging a window into a zone is unavailable");
     }
 
+    // Who was in front last: the tray menu needs it, because opening the menu
+    // puts the taskbar in front. Out of context, so nothing is loaded into
+    // other processes; our own windows are of no interest.
+    lastActive_ = UserWindow();
+    foregroundHook_ = ::SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+                                        nullptr, &AppController::ForegroundEventProc, 0, 0,
+                                        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    if (!foregroundHook_) {
+        WRITE_WARNING_LOG(L"Foreground watcher unavailable, the tray menu acts on "
+                          L"the foreground window only",
+                          log::dformat(L"error {}", ::GetLastError()));
+    }
+
     ::SetTimer(hwnd_, kTimerPoll, 400, nullptr);
 
     // Diagnosis hotkey. If something else already owns the combination the
@@ -272,12 +291,14 @@ bool AppController::Init(HINSTANCE instance) {
     }
 
     ApplyHotkeySetting();
+    ApplyOpenHotkey(/*report=*/false);
 
     // Asked now so the first tray menu already knows the answer, and asked off
     // the UI thread so a share that has gone away costs nothing at startup.
     RefreshBackupStatus();
 
-    WRITE_INFO_LOG(log::dformat(L"MinFlyout started, build {}", BuildStamp()),
+    WRITE_INFO_LOG(log::dformat(L"MinFlyout {} started, {}, build {}", VersionString(),
+                                CommitDescription(), BuildStamp()),
                    log::dformat(L"pid {}", ::GetCurrentProcessId()));
     return true;
 }
@@ -305,6 +326,36 @@ void AppController::ApplyHotkeySetting() {
     }
 }
 
+void AppController::ApplyOpenHotkey(bool report) {
+    const HotkeyChord wanted = ConfigStore::Instance().current().openChord;
+    if (wanted == openChord_) return;  // registered already, or off and staying off
+
+    if (!openChord_.empty()) {
+        ::UnregisterHotKey(hwnd_, kHotkeyOpen);
+        openChord_ = HotkeyChord{};
+    }
+    if (wanted.empty()) {
+        WRITE_INFO_LOG(L"Open hotkey switched off");
+        return;
+    }
+
+    const std::wstring name = FormatHotkey(wanted);
+    if (!::RegisterHotKey(hwnd_, kHotkeyOpen, wanted.modifiers | MOD_NOREPEAT, wanted.key)) {
+        WRITE_WARNING_LOG(log::dformat(L"{} is taken, the open hotkey is unavailable; "
+                                       L"the tray menu entry keeps working", name),
+                          log::dformat(L"error {}", ::GetLastError()));
+        if (report) {
+            ShowTrayBalloon(L"Hotkey unavailable",
+                            name + L" is already taken - by another program or by one of "
+                                   L"MinFlyout's own hotkeys. Pick a "
+                                   L"different \"openHotkey\".", true);
+        }
+        return;
+    }
+    openChord_ = wanted;
+    WRITE_INFO_LOG(log::dformat(L"Open hotkey: {}", name));
+}
+
 void AppController::UnregisterResizeHotkeys() {
     for (const HotkeySpec& spec : kResizeHotkeys) {
         const size_t slot = static_cast<size_t>(spec.id - kHotkeyWiden);
@@ -325,9 +376,17 @@ void AppController::Shutdown() {
         hotkeyZoneOk_ = false;
     }
     UnregisterResizeHotkeys();
+    if (!openChord_.empty()) {
+        ::UnregisterHotKey(hwnd_, kHotkeyOpen);
+        openChord_ = HotkeyChord{};
+    }
     EndDrag(/*applyZone=*/false);
     CloseFlyout(false);
     dragger_.Stop();
+    if (foregroundHook_) {
+        ::UnhookWinEvent(foregroundHook_);
+        foregroundHook_ = nullptr;
+    }
     hooks_.Stop();
     watcher_.Stop();
 
@@ -372,6 +431,10 @@ void AppController::HandleMouseMove() {
     const RECT hotZone = InflateCopy(hit_.buttonRect, 2, 2);
 
     if (state_ == State::Open) {
+        // Opened from the keyboard, the pointer was never on the button and
+        // may be anywhere - leaving a corridor it was never in means nothing.
+        if (openedByKey_) return;
+
         const RECT flyRect = flyout_.ScreenRect();
         // Corridor between button and flyout, so the mouse may travel there.
         RECT bridge{std::min(flyRect.left, hotZone.left),
@@ -1106,6 +1169,167 @@ void AppController::OpenFlyout() {
         return;
     }
 
+    openedByKey_ = false;
+    if (!ShowFlyout()) state_ = State::Idle;
+}
+
+void CALLBACK AppController::ForegroundEventProc(HWINEVENTHOOK, DWORD, HWND window,
+                                                LONG object, LONG child, DWORD, DWORD) {
+    if (object != OBJID_WINDOW || child != CHILDID_SELF || !window) return;
+    Instance().OnForeground(window);
+}
+
+void AppController::OnForeground(HWND window) {
+    HWND root = ::GetAncestor(window, GA_ROOT);
+    if (!root) return;
+
+    if (IsMeasurable(root)) lastActive_ = root;
+
+    // The immediate version of what the poll timer checks: a flyout from the
+    // keyboard belongs to the window it was opened for.
+    if (state_ == State::Open && openedByKey_ && root != hit_.window) {
+        WRITE_DEBUG_LOG(L"Keyboard flyout closed: another window came to the front",
+                        log::Describe(root));
+        CloseFlyout(false);
+    }
+}
+
+HWND AppController::UserWindow() const {
+    HWND front = ::GetForegroundWindow();
+    HWND root = front ? ::GetAncestor(front, GA_ROOT) : nullptr;
+    DWORD pid = 0;
+    if (root) ::GetWindowThreadProcessId(root, &pid);
+    if (IsMeasurable(root) && pid != ::GetCurrentProcessId()) return root;
+
+    // A minimized or closed window is not worth returning to.
+    if (lastActive_ && IsMeasurable(lastActive_)) return lastActive_;
+    return nullptr;
+}
+
+void AppController::ShowAbout() {
+    std::vector<ShortcutRow> rows;
+    const Config& config = ConfigStore::Instance().current();
+    constexpr const wchar_t* kAnywhere = L"Anywhere";
+    constexpr const wchar_t* kFlyout = L"In the flyout";
+    constexpr const wchar_t* kBorder = L"On a window border";
+
+    // What is actually registered, not what the file asks for: a taken
+    // combination says so instead of promising something that does nothing.
+    if (!config.openChord.empty()) {
+        rows.push_back({kAnywhere, FormatHotkey(config.openChord) +
+                                       (openChord_.empty() ? L"  (taken)" : L""),
+                        L"Open the flyout for the active window"});
+    }
+    rows.push_back({kAnywhere, std::wstring(L"Ctrl+Alt+F11") + (hotkeyZoneOk_ ? L"" : L"  (taken)"),
+                    L"Copy the zone of the active window"});
+    rows.push_back({kAnywhere, std::wstring(L"Ctrl+Alt+F12") + (hotkeyOk_ ? L"" : L"  (taken)"),
+                    L"Diagnose the window under the pointer"});
+    if (config.resize.enabled && config.resize.hotkeys) {
+        for (const HotkeySpec& spec : kResizeHotkeys) {
+            const bool ok = resizeHotkeys_[static_cast<size_t>(spec.id - kHotkeyWiden)];
+            const wchar_t* what = L"";
+            switch (spec.id) {
+            case kHotkeyWiden:     what = L"Wider"; break;
+            case kHotkeyNarrow:    what = L"Narrower"; break;
+            case kHotkeyTaller:    what = L"Taller"; break;
+            case kHotkeyShorter:   what = L"Shorter"; break;
+            case kHotkeyFullWidth: what = L"Full width, and back"; break;
+            default: break;
+            }
+            rows.push_back({kAnywhere, std::wstring(spec.name) + (ok ? L"" : L"  (taken)"), what});
+        }
+    }
+
+    rows.push_back({kFlyout, L"Tab, Shift+Tab", L"Next / previous monitor (toolbar and items included)"});
+    rows.push_back({kFlyout, L"Right, Left", L"Next / previous element"});
+    rows.push_back({kFlyout, L"Down, Up", L"Next / previous element"});
+    rows.push_back({kFlyout, L"Home, End", L"First / last element"});
+    rows.push_back({kFlyout, L"Enter, Space", L"Choose the highlighted element"});
+    rows.push_back({kFlyout, L"Esc", L"Close"});
+
+    if (config.resize.enabled) {
+        if (config.resize.borderModifiers) {
+            rows.push_back({kBorder, L"Ctrl+Click, Shift+Click", L"Larger / smaller by one step"});
+            rows.push_back({kBorder, L"Ctrl+Alt+Click, Shift+Alt+Click",
+                            L"The same, moving only the clicked edge"});
+        }
+        if (config.resize.doubleClickMaximizes) {
+            rows.push_back({kBorder, L"Double click left/right", L"Full width, and back"});
+        }
+        if (config.resize.wheel) {
+            rows.push_back({kBorder, L"Wheel", L"Move that edge"});
+        }
+    }
+
+    ShowAboutDialog(instance_, hwnd_, rows);
+}
+
+void AppController::OpenFlyoutFor(HWND window) {
+    if (state_ == State::Open) {
+        // The same keys close what they opened - and close a flyout the hover
+        // opened, too; either way the user asked for it to go.
+        CloseFlyout(/*suppressUntilLeave=*/false);
+        return;
+    }
+    if (paused_) {
+        // Paused means the mouse hook is quiet, and without it a click beside
+        // the flyout would not close it.
+        WRITE_INFO_LOG(L"Open hotkey ignored: detection is paused");
+        return;
+    }
+    if (dragState_ != DragState::None) return;  // a window is in mid-drag
+
+    if (state_ == State::Armed) {
+        ::KillTimer(hwnd_, kTimerHover);
+        state_ = State::Idle;
+    }
+
+    HWND root = window ? ::GetAncestor(window, GA_ROOT) : nullptr;
+    if (!IsMeasurable(root)) {
+        ShowTrayBalloon(L"MinFlyout",
+                        L"No window to open the flyout for. Bring a window to the "
+                        L"front first - the desktop, the taskbar and minimized "
+                        L"windows have no flyout.", true);
+        WRITE_WARNING_LOG(L"Open hotkey found no usable window", log::Describe(root));
+        return;
+    }
+
+    HitInfo info{};
+    info.window = root;
+    if (!::GetWindowRect(root, &info.windowRect)) return;
+
+    // The anchor is where the hover would have found the button. Asking the
+    // window by hit test needs a point to ask about, so the computed sources
+    // answer here - they are what the hover falls back on anyway.
+    RECT button{};
+    ProbeSource source = ProbeSource::Estimate;
+    if (ComputeMinimizeButton(root, CaptionLayoutOf(root), button, source)) {
+        info.buttonRect = button;
+        info.source = source;
+    } else {
+        // No minimize button: a narrow anchor below the middle of the title
+        // bar, so the flyout still hangs from the window it belongs to.
+        RECT frame = info.windowRect;
+        VisibleFrame(root, frame);
+        const int centre = (frame.left + frame.right) / 2;
+        const int bar = TitleBarHeight(DpiForWindowMonitor(root));
+        info.buttonRect = RECT{centre - 1, frame.top, centre + 1, frame.top + bar};
+        info.source = ProbeSource::Estimate;
+    }
+
+    hit_ = info;
+    openedByKey_ = true;
+    if (!ShowFlyout()) {
+        openedByKey_ = false;
+        state_ = State::Idle;
+        return;
+    }
+    WRITE_INFO_LOG(log::dformat(L"Flyout opened from the keyboard, anchored via {}",
+                                ProbeSourceName(info.source)),
+                   log::Describe(root));
+}
+
+bool AppController::ShowFlyout() {
     ctx_ = Context{};
     ctx_.targetWindow = hit_.window;
     ctx_.targetThreadId = ::GetWindowThreadProcessId(hit_.window, &ctx_.targetProcessId);
@@ -1160,8 +1384,7 @@ void AppController::OpenFlyout() {
 
     if (content.items.empty() && content.rows.empty() && content.tools.empty()) {
         WRITE_WARNING_LOG(L"Nothing to show", log::Describe(hit_.window));
-        state_ = State::Idle;
-        return;
+        return false;
     }
 
     const size_t itemCount = content.items.size();
@@ -1171,10 +1394,15 @@ void AppController::OpenFlyout() {
     flyout_.Show(std::move(content), hit_.buttonRect, ctx_.dpi, config.uiScale);
     state_ = State::Open;
     hooks_.SetKeyboardHookEnabled(true);
+    // From the keyboard the focus is there at once and Enter acts on it; from
+    // the hover the first arrow or Tab has to show it first.
+    hooks_.SetKeyNavigation(true, openedByKey_);
+    if (openedByKey_) flyout_.FocusFirst();
     WRITE_INFO_LOG(log::dformat(L"Flyout opened: {} zones on {} of {} monitors, {} items, {} dpi",
                                 flyout_.hotspots().size(), rowCount, monitors.size(),
                                 itemCount, ctx_.dpi),
                    log::Describe(ctx_.targetWindow), collectTime.ElapsedMs());
+    return true;
 }
 
 void AppController::CloseFlyout(bool suppressUntilLeave) {
@@ -1185,8 +1413,10 @@ void AppController::CloseFlyout(bool suppressUntilLeave) {
     if (state_ == State::Armed) ::KillTimer(hwnd_, kTimerHover);
 
     flyout_.Hide();
+    hooks_.SetKeyNavigation(false, false);
     hooks_.SetKeyboardHookEnabled(false);
     state_ = State::Idle;
+    openedByKey_ = false;
     suppressUntilLeave_ = suppressUntilLeave;
 }
 
@@ -1295,6 +1525,10 @@ void AppController::ReloadConfig() {
         ShowTrayBalloon(L"Configuration error", config.error, true);
         WRITE_WARNING_LOG(L"Configuration reload failed", config.error);
     }
+
+    // After the balloons above: a taken hotkey is the more useful news, and
+    // the later balloon is the one that stays.
+    ApplyOpenHotkey(/*report=*/true);
 }
 
 void AppController::ApplyWatchSetting() {
@@ -1330,8 +1564,11 @@ void AppController::ShowTrayBalloon(const wchar_t* title, const std::wstring& te
 void AppController::ShowTrayMenu() {
     // Before anything else: SetForegroundWindow below makes our own window the
     // foreground one, and "Copy zone of the active window" would then measure
-    // an invisible 0x0 window instead of the one the user means.
-    menuTarget_ = ::GetForegroundWindow();
+    // an invisible 0x0 window instead of the one the user means. And the
+    // foreground window is no answer either by now - clicking the tray icon
+    // or Win+B has already put the taskbar in front - so it is the window that
+    // was in front before that.
+    menuTarget_ = UserWindow();
 
     HMENU menu = ::CreatePopupMenu();
     if (!menu) return;
@@ -1344,6 +1581,14 @@ void AppController::ShowTrayMenu() {
     ::AppendMenuW(menu, MF_STRING, kMenuReloadConfig, L"Reload configuration");
     ::AppendMenuW(menu, MF_STRING, kMenuCopyZone,
                   L"Copy zone of the active window\t Ctrl+Alt+F11");
+    {
+        // The keyboard route has to be reachable from the keyboard alone even
+        // when the hotkey is off or taken: Win+B, the arrow keys and Enter get
+        // here without a mouse.
+        std::wstring label = L"Open flyout for the active window";
+        if (!openChord_.empty()) label += L"\t " + FormatHotkey(openChord_);
+        ::AppendMenuW(menu, MF_STRING, kMenuOpenFlyout, label.c_str());
+    }
 
     // Only where they can work. The answer comes from the last probe and is
     // never asked for here - the share is a network drive, and a menu that
@@ -1369,6 +1614,8 @@ void AppController::ShowTrayMenu() {
     ::AppendMenuW(menu, MF_STRING, kMenuOpenLog, L"Open log");
     ::AppendMenuW(menu, MF_STRING, kMenuOpenLogHtml, L"Open log as HTML");
     ::AppendMenuW(menu, MF_STRING, kMenuOpenLogFolder, L"Open log folder");
+    ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    ::AppendMenuW(menu, MF_STRING, kMenuAbout, L"About MinFlyout...");
     ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     ::AppendMenuW(menu, MF_STRING, kMenuExit, L"Exit");
 
@@ -1487,6 +1734,12 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         InvokeTool(static_cast<size_t>(wParam));
         return 0;
 
+    case WM_MFLY_KEY:
+        if (state_ == State::Open) {
+            flyout_.HandleKey(static_cast<UINT>(wParam), lParam != 0);
+        }
+        return 0;
+
     case WM_MFLY_CLOSED:
         CloseFlyout(false);
         return 0;
@@ -1523,6 +1776,7 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         switch (static_cast<int>(wParam)) {
         case kHotkeyDiagnose:    WriteDiagnosis(); return 0;
         case kHotkeyCaptureZone: CaptureZone(front); return 0;
+        case kHotkeyOpen:        OpenFlyoutFor(front); return 0;
         case kHotkeyWiden:
             ResizeWindow(front, step, SizeEdge::Horizontal, config.useWorkArea);
             return 0;
@@ -1558,8 +1812,16 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
         case kMenuCopyZone:     CaptureZone(menuTarget_); return 0;
+        case kMenuOpenFlyout:
+            // The menu made our own window the foreground one. Hand it back
+            // first - we still may, being in front - or the foreground check
+            // of the poll timer would close the flyout right away.
+            if (menuTarget_ && ::IsWindow(menuTarget_)) ::SetForegroundWindow(menuTarget_);
+            OpenFlyoutFor(menuTarget_);
+            return 0;
         case kMenuBackupConfig: BackupConfiguration(); return 0;
         case kMenuCompareConfig: CompareConfiguration(); return 0;
+        case kMenuAbout:        ShowAbout(); return 0;
         case kMenuExit:         ::PostQuitMessage(0); return 0;
         default: break;
         }
@@ -1609,6 +1871,21 @@ LRESULT AppController::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             if (state_ == State::Open &&
                 (!::IsWindow(hit_.window) || ::IsIconic(hit_.window))) {
                 CloseFlyout(false);
+            }
+            // A flyout from the keyboard has no pointer to follow, so the
+            // foreground window decides: Alt+Tab elsewhere and it goes. No
+            // foreground at all happens for a moment while windows switch,
+            // and our own process (the tray menu) does not count.
+            if (state_ == State::Open && openedByKey_) {
+                HWND front = ::GetForegroundWindow();
+                DWORD frontPid = 0;
+                if (front) ::GetWindowThreadProcessId(front, &frontPid);
+                if (front && frontPid != ::GetCurrentProcessId() &&
+                    ::GetAncestor(front, GA_ROOT) != hit_.window) {
+                    WRITE_DEBUG_LOG(L"Keyboard flyout closed: another window came to the front",
+                                    log::Describe(front));
+                    CloseFlyout(false);
+                }
             }
             // Nothing may leave a full-screen overlay behind: if no button is
             // down and no drop is pending, there is no drag left to draw for.

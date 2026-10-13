@@ -14,6 +14,7 @@
 #include "DragWatcher.h"
 #include "FlyoutWindow.h"
 #include "HookThread.h"
+#include "Hotkey.h"
 #include "WindowSizer.h"
 #include "ZoneOverlay.h"
 
@@ -137,6 +138,49 @@ private:
      * \return Result of the message handling.
      */
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * \brief WinEvent callback for \c EVENT_SYSTEM_FOREGROUND.
+     *
+     * Out of context, so it is delivered to the UI thread's message loop and
+     * may call into the controller directly.
+     *
+     * \param hook   The hook handle (unused).
+     * \param event  Always \c EVENT_SYSTEM_FOREGROUND.
+     * \param window The new foreground window.
+     * \param object Object ID; only \c OBJID_WINDOW is of interest.
+     * \param child  Child ID; only \c CHILDID_SELF is of interest.
+     * \param thread Thread that generated the event (unused).
+     * \param time   Event time (unused).
+     */
+    static void CALLBACK ForegroundEventProc(HWINEVENTHOOK hook, DWORD event, HWND window,
+                                             LONG object, LONG child, DWORD thread,
+                                             DWORD time);
+
+    /**
+     * \brief A window came to the front.
+     *
+     * Remembers it in \ref lastActive_ if it is one the flyout could act on,
+     * and closes a flyout opened from the keyboard when it belongs to a
+     * different window.
+     *
+     * \param window The new foreground window.
+     */
+    void OnForeground(HWND window);
+
+    /**
+     * \brief The window the user last worked in.
+     *
+     * The foreground window itself if it qualifies; otherwise \ref lastActive_.
+     * Clicking the tray icon or pressing Win+B makes the taskbar the foreground
+     * window, so the tray menu entries cannot simply ask for it.
+     *
+     * \return The window, or \c nullptr if there is none that qualifies.
+     */
+    HWND UserWindow() const;
+
+    /// Shows the About dialog, or brings it to the front if it is open.
+    void ShowAbout();
 
     /**
      * \brief Per-instance message handling.
@@ -313,6 +357,19 @@ private:
     /// Releases every resize hotkey that is currently registered.
     void UnregisterResizeHotkeys();
 
+    /**
+     * \brief Brings the open hotkey in line with Config::openChord.
+     *
+     * Called after every load. An unchanged combination that is already ours is
+     * left alone; a changed one is released before the new one is asked for, so
+     * a reload never ends up holding both.
+     *
+     * \param report \c true shows a balloon when the combination is taken -
+     *        after a reload the user has just typed it and wants to know; at
+     *        start-up the log line is enough.
+     */
+    void ApplyOpenHotkey(bool report);
+
     /// Stops the dwell timer if it is running.
     void StopDwell();
 
@@ -393,8 +450,42 @@ private:
      */
     void OpenLogFile(bool html);
 
+    /**
+     * \brief Opens the flyout after the hover delay, for the button in \ref hit_.
+     *
+     * Refuses when the pointer has left the button in the meantime - the hover
+     * route is about the pointer resting there.
+     */
     void OpenFlyout();
 
+    /**
+     * \brief Opens the flyout for a window without the pointer - the keyboard route.
+     *
+     * Bound to Config::openHotkey and to the tray menu entry. The flyout is
+     * anchored below the minimize button of \p window, computed the way
+     * \ref ComputeMinimizeButton does when a window does not answer the hit
+     * test; a window without a minimize button gets it below the middle of its
+     * title bar. Unlike the hover route it stays open when the pointer is
+     * elsewhere: Esc, the hotkey again, a click outside or another window
+     * coming to the front close it.
+     *
+     * If the flyout is already open, it is closed instead, so the hotkey
+     * toggles.
+     *
+     * \param window The foreground window, or the one that was in front when
+     *        the tray menu opened.
+     */
+    void OpenFlyoutFor(HWND window);
+
+    /**
+     * \brief Collects the content for \ref hit_ and shows the flyout.
+     *
+     * The part both routes share, after each has decided which window and
+     * which anchor.
+     *
+     * \return \c true if the flyout is open afterwards.
+     */
+    bool ShowFlyout();
     /**
      * \brief Closes the flyout and cleans up timers and keyboard hook.
      * \param suppressUntilLeave \c true suppresses reopening until the mouse
@@ -532,6 +623,17 @@ private:
     bool hotkeyOk_ = false;             ///< Ctrl+Alt+F12 could be registered.
     bool hotkeyZoneOk_ = false;         ///< Ctrl+Alt+F11 could be registered.
 
+    /// Config::openChord as it is registered; empty while none is.
+    HotkeyChord openChord_{};
+
+    /**
+     * \brief The open flyout came from the keyboard, not from hovering.
+     *
+     * Such a flyout ignores where the pointer is - it was never near the
+     * button - and closes on a change of the foreground window instead.
+     */
+    bool openedByKey_ = false;
+
     /**
      * \brief Foreground window at the moment the tray menu was opened.
      *
@@ -540,6 +642,17 @@ private:
      * needs. So it is remembered one line before that happens.
      */
     HWND menuTarget_ = nullptr;
+
+    /// \c EVENT_SYSTEM_FOREGROUND hook feeding \ref lastActive_.
+    HWINEVENTHOOK foregroundHook_ = nullptr;
+
+    /**
+     * \brief Last foreground window the flyout could act on.
+     *
+     * Not the taskbar, not the desktop, not our own windows - see
+     * \ref UserWindow for why that is needed.
+     */
+    HWND lastActive_ = nullptr;
 
     POINT     watchdogPt_{-32000, -32000};  ///< Cursor position at the last watchdog tick.
     unsigned long long watchdogMoves_ = 0;  ///< HookThread::MovesSeen at that tick.
