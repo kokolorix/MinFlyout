@@ -10,17 +10,41 @@ if(NOT WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
+# Version information: res/Version.h from Version.txt and git, written by the
+# same script the Visual Studio pre-build event runs. Once at configure time so
+# the header exists, and before every build so a new commit shows up without
+# re-running CMake. The script only rewrites the file when its content
+# changes, so an unchanged tree does not rebuild the resources.
+# ---------------------------------------------------------------------------
+find_program(MFLY_POWERSHELL NAMES pwsh powershell REQUIRED)
+set(MFLY_VERSION_COMMAND
+    ${MFLY_POWERSHELL} -NoProfile -NonInteractive -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/GenerateVersion.ps1
+    -ProjectDir ${CMAKE_CURRENT_SOURCE_DIR}
+    -OutputPath ${CMAKE_CURRENT_SOURCE_DIR}/res/Version.h
+    -DoxygenPath ${CMAKE_CURRENT_SOURCE_DIR}/Version.doxyfile
+    -VersionFile ${CMAKE_CURRENT_SOURCE_DIR}/Version.txt)
+execute_process(COMMAND ${MFLY_VERSION_COMMAND})
+add_custom_target(version
+    COMMAND ${MFLY_VERSION_COMMAND}
+    BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/res/Version.h
+               ${CMAKE_CURRENT_SOURCE_DIR}/Version.doxyfile
+    COMMENT "Generating res/Version.h and Version.doxyfile from Version.txt and git")
+
+# ---------------------------------------------------------------------------
 # Main application
 # ---------------------------------------------------------------------------
 add_executable(minflyout WIN32
     src/main.cpp
     src/Common.cpp
+    src/AboutDialog.cpp
     src/AppController.cpp
     src/CaptionProbe.cpp
     src/CaptionGeometry.cpp
     src/Diagnostics.cpp
     src/DragWatcher.cpp
     src/HookThread.cpp
+    src/Hotkey.cpp
     src/FlyoutWindow.cpp
     src/OverlayGeometry.cpp
     src/Painting.cpp
@@ -45,7 +69,9 @@ target_include_directories(minflyout PRIVATE src res)
 target_compile_definitions(minflyout PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 # ole32/uuid: SHGetKnownFolderPath and FOLDERID_RoamingAppData.
 # DPI and DWM functions are resolved at run time via GetProcAddress.
-target_link_libraries(minflyout PRIVATE user32 gdi32 shell32 advapi32 ole32 uuid)
+# comctl32: list view and tooltip of the About dialog.
+target_link_libraries(minflyout PRIVATE user32 gdi32 shell32 advapi32 ole32 uuid comctl32)
+add_dependencies(minflyout version)
 
 # The log viewer (tray menu "Open log as HTML") looks for its scripts next to
 # the executable. The pCloud deployment exists only in minflyout.vcxproj.
@@ -110,16 +136,33 @@ endif()
 
 add_test(NAME overlay COMMAND overlay_tests)
 
+# The key combination parser behind "openHotkey", same arrangement.
+add_executable(hotkey_tests
+    tests/HotkeyTest.cpp
+    src/Hotkey.cpp
+)
+target_include_directories(hotkey_tests PRIVATE src)
+target_compile_definitions(hotkey_tests PRIVATE UNICODE _UNICODE)
+if(MSVC)
+    target_compile_options(hotkey_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+    target_compile_options(hotkey_tests PRIVATE -Wall -Wextra)
+endif()
+
+add_test(NAME hotkey COMMAND hotkey_tests)
+
 # ---------------------------------------------------------------------------
 # Documentation:  cmake --build build --target docs
 # ---------------------------------------------------------------------------
 find_package(Doxygen)
 if(DOXYGEN_FOUND)
     add_custom_target(docs
-        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/MinFlyout.dox
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Generating Doxygen documentation into build/docs/html"
         VERBATIM)
+    # MinFlyout.dox pulls in Version.doxyfile, which the version target writes.
+    add_dependencies(docs version)
 else()
     message(STATUS "Doxygen not found - target 'docs' is not available.")
 endif()
